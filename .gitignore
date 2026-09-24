@@ -1,0 +1,44 @@
+# Build outputs
+**/bin/
+**/obj/
+.vs/
+TestResults/
+publish/
+publish-work/
+artifacts/
+
+# User-specific IDE files
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Portable/user data - may contain private monitoring information
+**/data/
+settings.json
+WebSiteMonitor.db
+*.db-shm
+*.db-wal
+logs/
+sounds/
+cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.part
+*.bak
+*.log
+
+# Release binaries are distributed through GitHub Releases, not Git
+release/
+*.exe
+*.pdb
+
+# Large third-party runtime archive; official release EXE embeds it
+WebSiteMonitor/Resources/ffmpeg-win64-lgpl-shared.zip
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.18362.0</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <AssemblyName>WebSiteMonitor</AssemblyName>
+    <RootNamespace>WebSiteMonitor</RootNamespace>
+    <Product>WebSiteMonitor</Product>
+    <Version>1.0.4</Version>
+    <FileVersion>1.0.4.0</FileVersion>
+    <AssemblyVersion>1.0.4.0</AssemblyVersion>
+    <ApplicationIcon>..\Resources\WebSiteMonitor.ico</ApplicationIcon>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>false</PublishTrimmed>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\WebSiteMonitor.Core\WebSiteMonitor.Core.csproj" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\Resources\WebSiteMonitor.ico" Link="Resources\WebSiteMonitor.ico" />
+    <EmbeddedResource Include="Resources\ffmpeg-win64-lgpl-shared.zip" LogicalName="WebSiteMonitor.Resources.ffmpeg-win64-lgpl-shared.zip" />
+    <EmbeddedResource Include="..\THIRD_PARTY_NOTICES.md" Link="Resources\THIRD_PARTY_NOTICES.md" LogicalName="WebSiteMonitor.Resources.THIRD_PARTY_NOTICES.md" />
+  </ItemGroup>
+</Project>
