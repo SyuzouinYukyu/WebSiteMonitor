@@ -8,6 +8,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly AppPaths _paths;
     private readonly FileLogger _logger;
     private readonly SettingsStore _settingsStore;
+    private readonly ExportPasswordStore _exportPassword;
     private readonly Database _database;
     private readonly SharedHttpFetcher _fetcher;
     private readonly MonitorEngine _engine;
@@ -18,20 +19,30 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly FontZoomMessageFilter _fontZoom;
     private readonly NotifyIcon _tray;
     private readonly SynchronizationContext _ui;
+    private readonly Func<Process> _restartStarter;
+    private readonly Func<bool>? _restartConfirmation;
+    private readonly bool _isolatedProbe;
     private MainForm? _mainForm;
     private AppSettings _settings;
     private bool _exiting;
+    private bool _restartConfirming;
     private bool _configurationBusy;
+    private bool _resourcesReleased;
     private readonly Queue<CheckResult> _deferredChecks = new();
 
-    public TrayApplicationContext(AppPaths paths, SingleInstanceCoordinator single, bool autostart)
+    public TrayApplicationContext(AppPaths paths, SingleInstanceCoordinator single, bool autostart,
+        bool isolatedProbe = false, SharedHttpFetcher? probeFetcher = null, Func<Process>? restartStarter = null, Func<bool>? restartConfirmation = null)
     {
         _paths = paths;
+        _isolatedProbe = isolatedProbe;
+        _restartStarter = restartStarter ?? (() => RestartLauncher.StartHelper());
+        _restartConfirmation = restartConfirmation;
         _ui = SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext();
         _logger = new FileLogger(paths.LogsDirectory);
         _sound = new SoundService(_logger);
         _logger.Info("起動");
         _settingsStore = new SettingsStore(paths.SettingsPath);
+        _exportPassword = new ExportPasswordStore(Path.Combine(paths.DataDirectory, "local", "export-password.dpapi"));
         _settings = _settingsStore.Load();
         UiFontManager.Initialize(_settings);
         _settingsStore.Save(_settings);
@@ -40,7 +51,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _database = new Database(paths.DatabasePath);
         _database.Initialize();
         _database.CleanupHistory(_settings.HistoryRetentionDays, DateTimeOffset.Now);
-        _fetcher = new SharedHttpFetcher();
+        _fetcher = probeFetcher ?? new SharedHttpFetcher();
         _engine = new MonitorEngine(_database, _fetcher, _logger, () => _settings.NotificationsEnabled);
         _dialogs = new UpdateDialogController(_database, _logger, OpenUrl, _ui);
         _notifications = new NotificationService(_logger);
@@ -59,13 +70,16 @@ internal sealed class TrayApplicationContext : ApplicationContext
         menu.Items.Add("設定", null, (_, _) => ShowSettings());
         menu.Items.Add("設定をエクスポート", null, async (_, _) => await TransferSettingsAsync(false));
         menu.Items.Add("設定をインポート", null, async (_, _) => await TransferSettingsAsync(true));
+        menu.Items.Add("エクスポート用パスワードを変更", null, (_, _) => ManageExportPassword(false));
+        menu.Items.Add("記憶したパスワードを解除", null, (_, _) => ManageExportPassword(true));
+        menu.Items.Add("再起動", null, async (_, _) => await RestartAsync());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("終了", null, (_, _) => ExitApplication());
+        menu.Items.Add("終了", null, async (_, _) => await CloseWholeAsync());
         UiFontManager.Register(menu, _settings.UiFontSize);
         _tray = new NotifyIcon
         {
             Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath) ?? SystemIcons.Application,
-            Text = "WebSite Monitor",
+            Text = ProductInfo.Title,
             Visible = true,
             ContextMenuStrip = menu
         };
@@ -76,6 +90,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ApplyWindowsIntegration(AppSettings settings)
     {
+        if (_isolatedProbe) return; // Verification must not alter the real user's OS registration.
         if (!settings.WindowsIntegrationEnabled)
         {
             settings.StartWithWindows = false;
@@ -94,10 +109,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     public void ShowMain()
     {
-        if (_configurationBusy) return;
+        if (_configurationBusy || _exiting) return;
         if (_mainForm is null || _mainForm.IsDisposed)
         {
-            _mainForm = new MainForm(_database, _engine, _scheduler, _sound, () => _settings, SaveSettings, ShowSettings, OpenUrl, TransferSettingsAsync, () => _configurationBusy);
+            _mainForm = new MainForm(_database, _engine, _scheduler, _sound, () => _settings, SaveSettings, ShowSettings, OpenUrl, TransferSettingsAsync, () => _configurationBusy || _exiting, RestartAsync, ManageExportPassword, CloseWholeAsync,
+                () => LogFileLaunch.OpenLatest(_paths.LogsDirectory, message => MessageBox.Show(_mainForm, message, "ログ", MessageBoxButtons.OK, MessageBoxIcon.Information)));
             _mainForm.FormClosed += (_, _) => { _mainForm?.Dispose(); _mainForm = null; };
         }
         _mainForm.Show();
@@ -108,7 +124,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private void ShowSettings()
     {
-        if (_configurationBusy) return;
+        if (_configurationBusy || _exiting) return;
         using var form = new SettingsForm(_settings);
         if (form.ShowDialog(_mainForm) != DialogResult.OK) return;
         _settings = form.Value;
@@ -125,6 +141,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     private async Task CheckAllAsync()
     {
+        if (_configurationBusy || _exiting) return;
         try { await _scheduler.CheckNowAsync(_database.GetSites().Where(site => site.Enabled)); }
         catch (Exception ex) { _logger.Error("一括確認に失敗しました", ex); }
     }
@@ -179,16 +196,98 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (Exception ex) { _logger.Error("ブラウザーを開けませんでした。", ex); }
     }
 
-    private void ExitApplication()
+    internal static bool HasProtectedEditors() => Application.OpenForms.Cast<Form>().Any(form => form is SiteEditForm or SettingsForm);
+    internal static bool IsShutdownBlocked(bool configurationBusy) => configurationBusy || HasProtectedEditors();
+
+    private Task CloseWholeAsync()
     {
-        if (_configurationBusy) return;
-        if (_exiting) return;
+        if (_exiting) return Task.CompletedTask;
+        if (IsShutdownBlocked(_configurationBusy))
+        {
+            MessageBox.Show(_mainForm, "設定入出力の完了を待ち、変更内容を保存またはキャンセルして、サイト編集・設定画面を閉じてから終了してください。", "完全に閉じる", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return Task.CompletedTask;
+        }
+        return ShutdownAsync(false);
+    }
+
+    private Task RestartAsync()
+    {
+        if (_configurationBusy || _exiting || _restartConfirming) return Task.CompletedTask;
+        if (IsShutdownBlocked(_configurationBusy))
+        {
+            MessageBox.Show("変更内容を保存またはキャンセルして、サイト編集・設定画面を閉じてから再起動してください。", "再起動", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return Task.CompletedTask;
+        }
+        _restartConfirming = true;
+        try
+        {
+            if (!(_restartConfirmation?.Invoke() ?? (MessageBox.Show(_mainForm, "監視処理を停止し、WebSite Monitorを再起動しますか？", "再起動", MessageBoxButtons.YesNo,
+                MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) == DialogResult.Yes))) return Task.CompletedTask;
+            return ShutdownAsync(true);
+        }
+        finally { _restartConfirming = false; }
+    }
+
+    private async Task ShutdownAsync(bool restart)
+    {
+        if (_configurationBusy || _exiting || _resourcesReleased) return;
         _exiting = true;
+        _tray.ContextMenuStrip!.Enabled = false;
+        if (_mainForm is not null) _mainForm.Enabled = false;
+        _dialogs.ConfigurationSuspended = true;
+        try
+        {
+            var tests = SiteEditForm.CancelAndDrainTestsAsync();
+            await _scheduler.StopAndDrainAsync();
+            // This waits for actual test completion, not just cancellation notification.
+            await tests.WaitAsync(TimeSpan.FromSeconds(20));
+            await _sound.ShutdownAndDrainAsync();
+            _mainForm?.SaveForShutdown();
+            _settingsStore.Save(_settings);
+            if (restart) using (_restartStarter()) { }
+        }
+        catch
+        {
+            _exiting = false;
+            _tray.ContextMenuStrip!.Enabled = true;
+            if (_mainForm is not null) _mainForm.Enabled = true;
+            _logger.Error("終了処理を完了できなかったため終了・再起動を中止しました。");
+            MessageBox.Show(_mainForm, "終了処理を完了できませんでした。監視の新規受付は停止しています。保存先を確認し、終了または再起動を再度実行してください。", "終了処理", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
         _dialogs.Dispose();
         _tray.Visible = false;
         _mainForm?.AllowExit();
         _mainForm?.Close();
+        ReleaseResources();
         ExitThread();
+    }
+
+    private void ManageExportPassword(bool forget)
+    {
+        if (_configurationBusy || _exiting || HasProtectedEditors()) return;
+        _configurationBusy = true;
+        _tray.ContextMenuStrip!.Enabled = false;
+        try
+        {
+            if (forget)
+            {
+                if (MessageBox.Show(_mainForm, "記憶したパスワードを解除しますか？次回のエクスポートで再入力が必要です。\n過去のバックアップは削除・変更しません。", "記憶したパスワードを解除",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+                _exportPassword.Forget();
+            }
+            else
+            {
+                using var dialog = new ConfigurationPasswordDialog(true, _settings.UiFontSize);
+                dialog.Text = "エクスポート用パスワードを変更";
+                if (dialog.ShowDialog(_mainForm) != DialogResult.OK) return;
+                _exportPassword.Save(dialog.Password);
+                dialog.Dispose(); // Clear masked inputs before waiting on the success message.
+                MessageBox.Show(_mainForm, "新しいパスワードを記憶しました。変更前のバックアップの復元には、旧パスワードが必要です。", "パスワード変更", MessageBoxButtons.OK, MessageBoxIcon.Information);
+            }
+        }
+        catch { MessageBox.Show(_mainForm, "パスワード記憶情報を変更できませんでした。保存先を確認してください。", "パスワード管理", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        finally { _configurationBusy = false; _tray.ContextMenuStrip!.Enabled = true; }
     }
 
     private async Task TransferSettingsAsync(bool importing)
@@ -224,17 +323,24 @@ internal sealed class TrayApplicationContext : ApplicationContext
                 if (save.ShowDialog(_mainForm) != DialogResult.OK) return;
                 path = save.FileName;
             }
-            using var password = new ConfigurationPasswordDialog(!importing, _settings.UiFontSize);
-            if (password.ShowDialog(_mainForm) != DialogResult.OK) return;
-            var secret = password.Password;
+            var secret = _exportPassword.ResolvePassword(importing, () =>
+            {
+                using var password = new ConfigurationPasswordDialog(!importing, _settings.UiFontSize);
+                return password.ShowDialog(_mainForm) == DialogResult.OK ? password.Password : null;
+            });
+            if (secret is null) return;
             if (!importing)
             {
                 var snapshot = ConfigurationTransfer.Capture(_database.GetSites(), _settings);
-                await Task.Run(() => ConfigurationTransfer.Export(path, snapshot, secret));
-                MessageBox.Show(_mainForm, $"{snapshot.Sites.Count}件のサイト設定とアプリ全体の設定を暗号化して保存しました。", "設定をエクスポート", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                var remembered = await Task.Run(() => _exportPassword.ExportAndRemember(path, snapshot, secret));
+                secret = null;
+                MessageBox.Show(_mainForm, $"{snapshot.Sites.Count}件のサイト設定とアプリ全体の設定を暗号化して保存しました。" +
+                    (remembered ? "\nパスワードをWindowsユーザー専用のDPAPIで記憶しました。" : "\nパスワードの記憶に失敗しました。保存したバックアップは有効です。次回は再入力が必要です。"),
+                    "設定をエクスポート", MessageBoxButtons.OK, remembered ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
                 return;
             }
             var document = await Task.Run(() => ConfigurationTransfer.Read(path, secret));
+            secret = null;
             using var mode = new ConfigurationImportDialog(document.Sites.Count, _settings.UiFontSize);
             if (mode.ShowDialog(_mainForm) != DialogResult.OK) return;
             var importMode = mode.Mode;
@@ -256,7 +362,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         catch (ConfigurationException ex)
         {
             // All ConfigurationException messages are fixed product messages, never raw input.
-            MessageBox.Show(_mainForm, ex.Message, "設定入出力", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(_mainForm, DisplayText.Content(ex.Message), "設定入出力", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
         catch
         {
@@ -279,22 +385,25 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     protected override void ExitThreadCore()
     {
-        _exiting = true;
-        _dialogs.Dispose();
+        if (!_resourcesReleased) { _ = ShutdownAsync(false); return; }
+        base.ExitThreadCore();
+    }
+
+    private void ReleaseResources()
+    {
+        if (_resourcesReleased) return;
+        _resourcesReleased = true;
         _logger.Info("終了開始");
-        try { _scheduler.StopAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult(); }
-        catch (Exception ex) { _logger.Error("スケジューラー終了待機に失敗しました", ex); }
         _fetcher.Dispose();
         _fontZoom.Dispose();
         _sound.Dispose();
         _tray.Dispose();
         _logger.Info("終了完了");
-        base.ExitThreadCore();
     }
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !_exiting) ExitApplication();
+        if (disposing && !_resourcesReleased) { _ = SiteEditForm.CancelAndDrainTestsAsync(); _scheduler.Dispose(); _dialogs.Dispose(); ReleaseResources(); }
         base.Dispose(disposing);
     }
 }

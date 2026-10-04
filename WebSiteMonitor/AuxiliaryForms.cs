@@ -5,8 +5,20 @@ namespace WebSiteMonitor;
 
 internal sealed class HistoryForm : Form
 {
+    private readonly Database _database;
+    private readonly DataGridView _grid;
+    private readonly ComboBox _filter = new() { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill, IntegralHeight = false, MaxDropDownItems = 15 };
+    private readonly Label _message = new() { AutoSize = true, Dock = DockStyle.Bottom, Padding = new Padding(8) };
+    private readonly Button _browser = new() { Text = "Webサイトを開く", AutoSize = true };
+    private readonly ToolTip _filterTip = new();
+    private int _loadGeneration;
+    internal Task CurrentLoad { get; private set; } = Task.CompletedTask;
+    internal long? SelectedSiteId => (_filter.SelectedItem as HistoryChoice)?.SiteId;
+    private sealed record HistoryChoice(long? SiteId, string Caption) { public override string ToString() => Caption; }
+
     public HistoryForm(Database database, long? siteId, Action<string> open)
     {
+        _database = database;
         Text = "WebSite Monitor — 更新履歴";
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Yu Gothic UI", 9F);
@@ -19,22 +31,39 @@ internal sealed class HistoryForm : Form
             SelectionMode = DataGridViewSelectionMode.FullRowSelect, AutoGenerateColumns = false, ScrollBars = ScrollBars.Both,
             AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells, ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize
         };
+        _grid = grid;
+        grid.MultiSelect = false;
         AddColumn(grid, "At", "日時", 150);
         AddColumn(grid, "Name", "サイト名", 170);
         AddColumn(grid, "Old", "変更前プレビュー", 280);
         AddColumn(grid, "New", "変更後プレビュー", 280);
         AddColumn(grid, "Url", "URL", 250);
-        var entries = database.GetHistory(siteId);
-        foreach (var entry in entries)
+        var filterPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(8) };
+        filterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        filterPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        filterPanel.Controls.Add(new Label { Text = "表示対象", AutoSize = true, Anchor = AnchorStyles.Left, Margin = new Padding(0, 4, 12, 4) }, 0, 0);
+        filterPanel.Controls.Add(_filter, 1, 0);
+        _filter.Items.Add(new HistoryChoice(null, "すべて"));
+        foreach (var site in database.GetSites())
+            _filter.Items.Add(new HistoryChoice(site.Id, $"{DisplayText.Content(site.Name)} — {NotificationUrl.Sanitize(site.Url)}（ID:{site.Id}）"));
+        _filter.SelectedIndex = 0;
+        if (siteId is not null)
+            for (var i = 1; i < _filter.Items.Count; i++)
+                if (((HistoryChoice)_filter.Items[i]!).SiteId == siteId) { _filter.SelectedIndex = i; break; }
+        void SizeDropDown()
         {
-            var row = grid.Rows[grid.Rows.Add(entry.ChangedAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm"), NotificationUrl.RedactText(entry.SiteName),
-                NotificationUrl.RedactText(entry.OldPreview), NotificationUrl.RedactText(entry.NewPreview), NotificationUrl.Sanitize(entry.Url))];
-            row.Tag = entry;
+            var required = _filter.Items.Cast<object>().Select(item => TextRenderer.MeasureText(item.ToString(), _filter.Font).Width + 28).DefaultIfEmpty(200).Max();
+            _filter.DropDownWidth = Math.Clamp(required, Math.Max(1, _filter.Width), Math.Max(_filter.Width, Screen.FromControl(this).WorkingArea.Width - 32));
+            _filterTip.SetToolTip(_filter, _filter.SelectedItem?.ToString());
         }
+        _filter.FontChanged += (_, _) => SizeDropDown();
+        _filter.DropDown += (_, _) => SizeDropDown();
+        _filter.SelectedIndexChanged += (_, _) => { SizeDropDown(); if (IsHandleCreated) CurrentLoad = LoadHistoryAsync(); };
+        Shown += (_, _) => CurrentLoad = LoadHistoryAsync();
+        FormClosed += (_, _) => { _loadGeneration++; _filterTip.Dispose(); };
         var buttons = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, Padding = new Padding(8) };
         var close = new Button { Text = "閉じる", AutoSize = true, DialogResult = DialogResult.Cancel };
-        var browser = new Button { Text = "Webサイトを開く", AutoSize = true };
-        void UpdateBrowserState() => browser.Enabled = grid.CurrentRow?.Tag is HistoryEntry entry && NotificationUrl.Sanitize(entry.Url).Length != 0;
+        var browser = _browser;
         grid.SelectionChanged += (_, _) => UpdateBrowserState();
         browser.Click += (_, _) =>
         {
@@ -45,9 +74,43 @@ internal sealed class HistoryForm : Form
         UpdateBrowserState();
         buttons.Controls.AddRange([close, browser]);
         Controls.Add(grid);
+        Controls.Add(_message);
         Controls.Add(buttons);
+        Controls.Add(filterPanel);
         CancelButton = close;
         UiFontManager.Apply(this, UiFontManager.CurrentSize);
+    }
+
+    private void UpdateBrowserState() => _browser.Enabled = _grid.CurrentRow?.Tag is HistoryEntry entry && NotificationUrl.Sanitize(entry.Url).Length != 0;
+
+    private async Task LoadHistoryAsync()
+    {
+        var generation = ++_loadGeneration;
+        var id = SelectedSiteId;
+        _grid.Rows.Clear();
+        _message.Text = "更新履歴を読み込み中…";
+        try
+        {
+            // The SQL applies SiteId before LIMIT; never filter the global latest 1000 in the UI.
+            var entries = await Task.Run(() => _database.GetHistory(id));
+            if (IsDisposed || Disposing || generation != _loadGeneration) return;
+            _grid.SuspendLayout();
+            _grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.None;
+            try
+            {
+                foreach (var entry in entries)
+                {
+                    var row = _grid.Rows[_grid.Rows.Add(entry.ChangedAt.ToLocalTime().ToString("yyyy/MM/dd HH:mm"), DisplayText.Content(entry.SiteName),
+                        DisplayText.Content(entry.OldPreview), DisplayText.Content(entry.NewPreview), NotificationUrl.Sanitize(entry.Url))];
+                    row.Tag = entry;
+                }
+            }
+            finally { _grid.AutoSizeRowsMode = DataGridViewAutoSizeRowsMode.AllCells; _grid.ResumeLayout(); }
+            UpdateBrowserState();
+            _message.Text = entries.Count == 0 ? (id is null ? "更新履歴はありません。" : "このサイトの更新履歴はありません。") : $"最新 {entries.Count}件を表示しています。";
+        }
+        catch (Exception ex)
+        { if (!IsDisposed && !Disposing && generation == _loadGeneration) _message.Text = "更新履歴を読み込めませんでした。 " + DisplayText.Exception(ex); }
     }
 
     private static void AddColumn(DataGridView grid, string name, string header, int width)
@@ -74,7 +137,7 @@ internal sealed class SettingsForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Yu Gothic UI", 9F);
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(680, 620);
+        MinimumSize = new Size(680, 300);
         Size = new Size(760, 700);
         _pcmRate.Items.AddRange([8000, 11025, 16000, 22050, 32000, 44100, 48000, 96000]);
         _pcmBits.Items.AddRange([8, 16, 24, 32]);
@@ -89,8 +152,8 @@ internal sealed class SettingsForm : Form
         SelectOrAdd(_pcmBits, value.PcmBits);
         _pcmChannels.SelectedItem = _pcmChannels.Items.Cast<ChannelChoice>().First(x => x.Value == Math.Clamp(value.PcmChannels, 1, 2));
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(18), AutoScroll = true };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
+        var root = new TableLayoutPanel { ColumnCount = 2, Padding = new Padding(18) };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(root, "Windows統合", _integration);
         AddRow(root, "", _start);
@@ -100,7 +163,7 @@ internal sealed class SettingsForm : Form
         AddRow(root, "ログ保存日数", _logs);
         var pcm = new GroupBox { Text = "PCM（.pcm / .raw）再生設定", Dock = DockStyle.Top, AutoSize = true };
         var pcmTable = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 2, Padding = new Padding(10) };
-        pcmTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+        pcmTable.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         pcmTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRow(pcmTable, "サンプルレート", _pcmRate);
         AddRow(pcmTable, "ビット深度", _pcmBits);
@@ -122,18 +185,14 @@ internal sealed class SettingsForm : Form
         root.Controls.Add(integration, 0, root.RowCount);
         root.SetColumnSpan(integration, 2);
         root.RowCount++;
-        var actions = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
+        var actions = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft };
         var save = new Button { Text = "保存", AutoSize = true };
         var cancel = new Button { Text = "キャンセル", AutoSize = true, DialogResult = DialogResult.Cancel };
-        var about = new Button { Text = "About / 第三者ライセンス", AutoSize = true };
+        var about = new Button { Text = "バージョン情報 / 第三者ライセンス", AutoSize = true };
         save.Click += Save;
         about.Click += (_, _) => { using var dialog = new AboutForm(); dialog.ShowDialog(this); };
         actions.Controls.AddRange([save, cancel, about]);
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(actions, 0, root.RowCount);
-        root.SetColumnSpan(actions, 2);
-        root.RowCount++;
-        Controls.Add(root);
+        ScrollableDialogLayout.Install(this, root, actions, new Size(680, 300));
         _integration.CheckedChanged += (_, _) => _start.Enabled = _integration.Checked;
         _start.Enabled = _integration.Checked;
         AcceptButton = save;
@@ -199,7 +258,7 @@ internal sealed class AboutForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = "WebSite Monitor\nv1.1.0", Font = new Font("Yu Gothic UI", 13F, FontStyle.Bold), AutoSize = true }, 0, 0);
+        layout.Controls.Add(new Label { Text = "WebSite Monitor\nv" + ProductInfo.Version, Font = new Font("Yu Gothic UI", 13F, FontStyle.Bold), AutoSize = true }, 0, 0);
         var license = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Text = LicenseText.Load() };
         layout.Controls.Add(license, 0, 1);
         var close = new Button { Text = "閉じる", AutoSize = true, DialogResult = DialogResult.Cancel, Anchor = AnchorStyles.Right };
@@ -304,7 +363,7 @@ internal sealed class UpdatePopup : Form
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, Padding = new Padding(10) };
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var message = new Label { Text = $"{NotificationUrl.RedactText(site.Name)}\n更新を検出しました\n{DateTime.Now:yyyy/MM/dd HH:mm}", AutoSize = true, Dock = DockStyle.Fill };
+        var message = new Label { Text = $"{DisplayText.Content(site.Name)}\n更新を検出しました\n{DateTime.Now:yyyy/MM/dd HH:mm}", AutoSize = true, Dock = DockStyle.Fill };
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft };
         var close = new Button { Text = "閉じる", AutoSize = true };
         var openButton = new Button { Text = "Webサイトを開く", AutoSize = true, Enabled = NotificationTargetUrl.Length != 0 };

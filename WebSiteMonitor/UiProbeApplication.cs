@@ -42,7 +42,7 @@ internal static class UiProbeApplication
             }
 
             using var form = new MainForm(database, new MonitorEngine(database, fetcher, logger), scheduler, sound, () => settings, Save, ShowSettings, _ => { });
-            form.Text = "WebSite Monitor v1.1.0 — UI検査";
+            form.Text = ProductInfo.Title + " — UI検査";
             form.AllowExit();
             form.Shown += (_, _) =>
             {
@@ -56,6 +56,20 @@ internal static class UiProbeApplication
                 foreach (var child in childForms) child.Show(form);
                 new UpdatePopup(new Site { Name = "表示確認用ポップアップ", Url = "https://example.test/" }, _ => { }).Show(form);
                 dialogs.TryShowNext();
+                Application.DoEvents();
+                foreach (var child in childForms.Where(child => child is SiteEditForm or SettingsForm))
+                {
+                    var footer = child.Controls.Find("FixedFooter", true).Single();
+                    var fits = Screen.FromControl(child).WorkingArea.Contains(child.Bounds)
+                        && footer.Controls.Cast<Control>().All(button => child.ClientRectangle.Contains(
+                            child.RectangleToClient(button.Parent!.RectangleToScreen(button.Bounds))));
+                    Console.WriteLine($"UI_PROBE_{(fits ? "OK" : "FAILED")} {child.GetType().Name} dpi={child.DeviceDpi} font={child.Font.SizeInPoints} bounds={child.Bounds} work={Screen.FromControl(child).WorkingArea}");
+                }
+                var transfer = form.Controls.OfType<ToolStrip>().SelectMany(strip => strip.Items.Cast<ToolStripItem>()).OfType<ToolStripDropDownButton>().Single();
+                transfer.ShowDropDown(); Application.DoEvents();
+                var equalFonts = transfer.DropDownItems.Cast<ToolStripItem>().All(item => item.Font.Equals(transfer.Font));
+                Console.WriteLine($"UI_PROBE_{(equalFonts ? "OK" : "FAILED")} menu parent={transfer.Font.SizeInPoints} children={string.Join(",", transfer.DropDownItems.Cast<ToolStripItem>().Select(item => item.Font.SizeInPoints))}");
+                transfer.HideDropDown();
                 if (autoCloseAfter is not { } duration) return;
                 var timer = new System.Windows.Forms.Timer { Interval = Math.Clamp((int)duration.TotalMilliseconds, 1000, 60000) };
                 timer.Tick += (_, _) => { timer.Stop(); timer.Dispose(); dialogs.Dispose(); form.Close(); };

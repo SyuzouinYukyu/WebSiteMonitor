@@ -8,7 +8,6 @@ internal sealed class UpdateDialog : Form
     private readonly Action<string> _open;
     private readonly LinkLabel _link;
     private readonly Label _error = new() { AutoSize = true, ForeColor = Color.Firebrick, Visible = false };
-    private bool _captionGesture;
     private bool _applicationShutdown;
     public bool Confirmed { get; private set; }
     public PendingUpdateDialog Notification { get; }
@@ -29,10 +28,11 @@ internal sealed class UpdateDialog : Form
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(420, 200);
         ClientSize = new Size(560, 210);
-        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1, Padding = new Padding(18) };
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 4, ColumnCount = 1, Padding = new Padding(18) };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         var message = new Label { Text = "ウェブサイトが更新されました。", AutoSize = true, Margin = new Padding(0, 0, 0, 14) };
         var links = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
@@ -51,6 +51,15 @@ internal sealed class UpdateDialog : Form
         layout.Controls.Add(message, 0, 0);
         layout.Controls.Add(links, 0, 1);
         layout.Controls.Add(_error, 0, 2);
+        var buttons = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, FlowDirection = FlowDirection.RightToLeft, WrapContents = false, Margin = new Padding(0, 8, 0, 0) };
+        var close = new Button { Text = "閉じる", AutoSize = true };
+        var browse = new Button { Text = "Webサイトを見る", AutoSize = true, Enabled = Notification.Url.Length != 0 };
+        close.Click += (_, _) => Close();
+        browse.Click += (_, _) => OpenLink();
+        buttons.Controls.AddRange([close, browse]);
+        layout.Controls.Add(buttons, 0, 3);
+        AcceptButton = close;
+        CancelButton = close;
         Controls.Add(layout);
         UiFontManager.Apply(this, UiFontManager.CurrentSize);
         Reflow();
@@ -68,13 +77,14 @@ internal sealed class UpdateDialog : Form
 
     internal bool ConfirmFromCaption()
     {
+        if (Confirmed) return true;
         try
         {
-            if (!_acknowledge()) { ShowError("確認を保存できません。もう一度「×」を押してください。"); return false; }
+            if (!_acknowledge()) { ShowError("確認を保存できません。もう一度「閉じる」または「×」を押してください。"); return false; }
             Confirmed = true;
             return true;
         }
-        catch { ShowError("確認を保存できません。もう一度「×」を押してください。"); return false; }
+        catch { ShowError("確認を保存できません。もう一度「閉じる」または「×」を押してください。"); return false; }
     }
 
     private void ShowError(string message) { _error.Text = message; _error.Visible = true; }
@@ -87,33 +97,14 @@ internal sealed class UpdateDialog : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (keyData is Keys.Escape or Keys.Enter || keyData == (Keys.Alt | Keys.F4)) return true;
+        if (keyData == Keys.Escape) { Close(); return true; }
         return base.ProcessCmdKey(ref msg, keyData);
-    }
-
-    protected override void WndProc(ref Message m)
-    {
-        const int WmNcLButtonDown = 0x00A1, HitClose = 20, WmSysCommand = 0x0112, ScClose = 0xF060;
-        if (m.Msg == WmNcLButtonDown && m.WParam.ToInt32() == HitClose)
-        {
-            // DefWindowProc sends SC_CLOSE while handling the actual caption-button gesture.
-            // Scope the permission to this call so an abandoned mouse gesture cannot authorize Alt+F4 later.
-            _captionGesture = true;
-            try { base.WndProc(ref m); }
-            finally { _captionGesture = false; }
-            return;
-        }
-        if (m.Msg == WmSysCommand && (m.WParam.ToInt64() & 0xFFF0) == ScClose && !_applicationShutdown)
-        {
-            if (!_captionGesture || !ConfirmFromCaption()) return;
-        }
-        base.WndProc(ref m);
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
         if (!Confirmed && !_applicationShutdown && e.CloseReason is not (CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing))
-            e.Cancel = true;
+            e.Cancel = !ConfirmFromCaption();
         base.OnFormClosing(e);
     }
 }

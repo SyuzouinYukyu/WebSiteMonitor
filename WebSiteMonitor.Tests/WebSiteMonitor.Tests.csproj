@@ -12,4 +12,5 @@
   </ItemGroup>
   <ItemGroup><ProjectReference Include="..\WebSiteMonitor.Core\WebSiteMonitor.Core.csproj" /><ProjectReference Include="..\WebSiteMonitor\WebSiteMonitor.csproj" /></ItemGroup>
   <ItemGroup><None Include="..\THIRD_PARTY_NOTICES.md" Link="THIRD_PARTY_NOTICES.md" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures\v110-settings.wsmcfg.base64" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

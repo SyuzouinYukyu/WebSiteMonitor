@@ -72,7 +72,7 @@ public sealed class UiLayoutTests : IDisposable
             ShowForLayout(settings, history, about, popup);
             Assert.Contains(FindAll<CheckBox>(settings), box => box.Text == "Windows通知・スタートメニュー統合を有効にする");
             Assert.Contains(FindAll<Button>(settings), button => button.Text == "Windows統合情報を解除");
-            Assert.Contains(FindAll<Button>(settings), button => button.Text == "About / 第三者ライセンス");
+            Assert.Contains(FindAll<Button>(settings), button => button.Text == "バージョン情報 / 第三者ライセンス");
             var historyGrid = FindAll<DataGridView>(history).Single();
             Assert.Contains(historyGrid.Columns.Cast<DataGridViewColumn>(), column => column.HeaderText == "変更前プレビュー");
             Assert.Contains(historyGrid.Columns.Cast<DataGridViewColumn>(), column => column.HeaderText == "変更後プレビュー");
@@ -194,11 +194,16 @@ public sealed class UiLayoutTests : IDisposable
             for (var index = 0; index < 20; index++) global::WebSiteMonitor.UiFontManager.Change(settings, 1, _ => saves++);
             Assert.Equal(18.0, settings.UiFontSize);
             Assert.True(saves > 0);
-            Assert.True(global::WebSiteMonitor.UiFontManager.ShouldZoom(new Label(), false));
-            Assert.False(global::WebSiteMonitor.UiFontManager.ShouldZoom(new DataGridView(), false));
-            Assert.False(global::WebSiteMonitor.UiFontManager.ShouldZoom(new TextBox { Multiline = true }, false));
-            Assert.False(global::WebSiteMonitor.UiFontManager.ShouldZoom(new Panel { AutoScroll = true }, false));
-            Assert.True(global::WebSiteMonitor.UiFontManager.ShouldZoom(new DataGridView(), true));
+            using var filter = new global::WebSiteMonitor.FontZoomMessageFilter(() => settings, _ => saves++);
+            using var form = new Form();
+            foreach (var target in new Control[] { new Label(), new DataGridView(), new TextBox { Multiline = true }, new Panel { AutoScroll = true } })
+            {
+                form.Controls.Add(target);
+                var message = Message.Create(target.Handle, 0x020A, (IntPtr)(120 << 16), IntPtr.Zero);
+                Assert.False(filter.HandleMessage(ref message, Keys.None));
+                Assert.False(filter.HandleMessage(ref message, Keys.Control));
+            }
+            Assert.Equal(18.0, settings.UiFontSize);
         });
     }
     [Theory]

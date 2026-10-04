@@ -119,7 +119,7 @@ public sealed class V105DialogTests : IDisposable
     [InlineData(10)]
     [InlineData(14)]
     [InlineData(18)]
-    public void DialogStaysVisibleForLinksKeysFocusAndShutdownWithoutAcknowledging(int fontSize)
+    public void DialogStaysVisibleForLinksFocusAndShutdownWithoutAcknowledging(int fontSize)
     {
         Sta(() =>
         {
@@ -130,15 +130,10 @@ public sealed class V105DialogTests : IDisposable
             form.Show(); Application.DoEvents();
             Assert.InRange(form.Font.SizeInPoints, fontSize - 0.1f, fontSize + 0.1f);
             Assert.True(form.TopMost && form.ShowInTaskbar); Assert.False(form.MinimizeBox || form.MaximizeBox);
-            Assert.Equal("WebSite Monitor — 更新通知", form.Text); Assert.Empty(All<Button>(form));
+            Assert.Equal("WebSite Monitor — 更新通知", form.Text);
+            Assert.Equal(new[] { "閉じる", "Webサイトを見る" }, All<Button>(form).Select(button => button.Text));
             form.OpenLink(); Assert.Equal(notification.Url, opened); Assert.True(form.Visible); Assert.Equal(0, acknowledgements);
-            foreach (var keys in new[] { Keys.Escape, Keys.Enter, Keys.Alt | Keys.F4 })
-            {
-                var msg = Message.Create(form.Handle, 0x0100, IntPtr.Zero, IntPtr.Zero);
-                Assert.True((bool)typeof(global::WebSiteMonitor.UpdateDialog).GetMethod("ProcessCmdKey", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(form, [msg, keys])!);
-            }
-            SendMessage(form.Handle, 0x0112, (IntPtr)0xF060, IntPtr.Zero);
-            form.Close(); Application.DoEvents(); Assert.True(form.Visible); Assert.Equal(0, acknowledgements);
+            Assert.True(form.Visible); Assert.Equal(0, acknowledgements);
             using (var other = new Form()) { other.Show(); other.Activate(); Application.DoEvents(); }
             Assert.True(form.Visible); Assert.False(form.Confirmed);
             var shutdown = new FormClosingEventArgs(CloseReason.WindowsShutDown, false);

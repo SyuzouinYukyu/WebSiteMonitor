@@ -7,8 +7,10 @@ namespace WebSiteMonitor.Core;
 public static class NotificationUrl
 {
     private const int MaximumUrlLength = 8192;
-    private static readonly Regex UrlInText = new(@"\b(?:[a-z][a-z0-9+.-]*://|https?%(?:25){0,2}3a%(?:25){0,2}2f%(?:25){0,2}2f)[^\s<>""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
-    private static readonly Regex BearerInText = new(@"\bBearer\s+[^\s,;]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
+    // HTML text extraction can join adjacent nodes. Credentials must remain redacted
+    // even when a preceding node removes the usual word boundary.
+    private static readonly Regex UrlInText = new(@"(?:[a-z][a-z0-9+.-]*://|https?%(?:25){0,2}3a%(?:25){0,2}2f%(?:25){0,2}2f)[^\s<>""']+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(100));
+    private static readonly Regex BearerInText = new(@"Bearer\s+[^\s,;]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
     private static readonly HashSet<string> SecretKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "token", "auth", "authsystemfeedtoken", "accesstoken", "apikey", "secret", "password",

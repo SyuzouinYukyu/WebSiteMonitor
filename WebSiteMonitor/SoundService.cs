@@ -402,6 +402,12 @@ internal sealed class SoundService : IDisposable
         lock (_sync) return _shutdownTask ??= ShutdownCoreAsync(timeout ?? TimeSpan.FromSeconds(3));
     }
 
+    internal async Task ShutdownAndDrainAsync(TimeSpan? timeout = null)
+    {
+        await ShutdownAsync(timeout).ConfigureAwait(false);
+        await _worker.WaitAsync(timeout ?? TimeSpan.FromSeconds(3)).ConfigureAwait(false);
+    }
+
     private async Task ShutdownCoreAsync(TimeSpan timeout)
     {
         ActivePlayback? active;

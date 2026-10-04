@@ -19,7 +19,6 @@ internal static class UiFontManager
     private sealed record FontBaseline(string Family, float Size, FontStyle Style);
 
     private static readonly ConditionalWeakTable<Control, FontBaseline> ControlFonts = new();
-    private static readonly ConditionalWeakTable<ToolStripItem, FontBaseline> ItemFonts = new();
     private static readonly Dictionary<(string Family, float Size, FontStyle Style), Font> Fonts = [];
     private static readonly List<WeakReference<ToolStrip>> RegisteredStrips = [];
     private static double _currentSize = UiFontSettings.DefaultSize;
@@ -55,7 +54,7 @@ internal static class UiFontManager
         {
             ApplyFont(form, size);
             foreach (var control in Descendants(form)) ApplyFont(control, size);
-                        foreach (var strip in Descendants(form).OfType<ToolStrip>()) ApplyToolStrip(strip, size);
+            foreach (var strip in Descendants(form).OfType<ToolStrip>()) ApplyToolStrip(strip, size, form.Font);
             foreach (var grid in Descendants(form).OfType<DataGridView>()) RefreshGridMetrics(grid);
             RecalculateLayouts(form);
         }
@@ -63,19 +62,8 @@ internal static class UiFontManager
         {
             form.ResumeLayout(true);
             form.PerformLayout();
+            ScrollableDialogLayout.Refresh(form);
         }
-    }
-
-    internal static bool ShouldZoom(Control? target, bool controlPressed)
-    {
-        if (controlPressed) return true;
-        if (target is null) return false;
-        return target is not DataGridView
-            && target is not ListBox
-            && target is not ComboBox
-            && target is not TextBoxBase { Multiline: true }
-            && target is not Panel
-            && target is not ScrollableControl { AutoScroll: true };
     }
 
     public static void Register(ToolStrip strip, double requestedSize)
@@ -102,17 +90,11 @@ internal static class UiFontManager
     {
         CaptureBaseline(form);
         foreach (var control in Descendants(form)) CaptureBaseline(control);
-        foreach (var item in Descendants(form).OfType<ToolStrip>().SelectMany(strip => strip.Items.Cast<ToolStripItem>())) CaptureBaseline(item);
     }
 
     private static void CaptureBaseline(Control control)
     {
         if (!ControlFonts.TryGetValue(control, out _)) ControlFonts.Add(control, new FontBaseline(control.Font.FontFamily.Name, control.Font.SizeInPoints, control.Font.Style));
-    }
-
-    private static void CaptureBaseline(ToolStripItem item)
-    {
-        if (!ItemFonts.TryGetValue(item, out _)) ItemFonts.Add(item, new FontBaseline(item.Font.FontFamily.Name, item.Font.SizeInPoints, item.Font.Style));
     }
 
     private static void ApplyFont(Control control, double size)
@@ -121,21 +103,15 @@ internal static class UiFontManager
         control.Font = GetFont(baseline, size);
     }
 
-    private static void ApplyFont(ToolStripItem item, double size)
+    private static void ApplyToolStrip(ToolStrip strip, double size, Font? inheritedFont = null)
     {
-        var baseline = ItemFonts.GetValue(item, current => new FontBaseline(current.Font.FontFamily.Name, current.Font.SizeInPoints, current.Font.Style));
-        item.Font = GetFont(baseline, size);
-    }
-
-    private static void ApplyToolStrip(ToolStrip strip, double size)
-    {
-        CaptureBaseline(strip);
-        ApplyFont(strip, size);
+        // Lazy dropdowns already inherit the zoomed owner font. Never treat that
+        // inherited value (or the OS menu font) as another 9pt scaling baseline.
+        strip.Font = inheritedFont ?? GetFont(new FontBaseline("Yu Gothic UI", 9F, FontStyle.Regular), size);
         foreach (ToolStripItem item in strip.Items)
         {
-            CaptureBaseline(item);
-            ApplyFont(item, size);
-            if (item is ToolStripDropDownItem { DropDown: { } dropDown }) ApplyToolStrip(dropDown, size);
+            item.Font = strip.Font;
+            if (item is ToolStripDropDownItem { DropDown: { } dropDown }) ApplyToolStrip(dropDown, size, item.Font);
         }
         strip.PerformLayout();
     }
@@ -194,7 +170,7 @@ internal static class UiFontManager
 
 internal sealed class FontZoomMessageFilter : IMessageFilter, IDisposable
 {
-    private const int WmMouseWheel = 0x020A;
+    private const int WmKeyDown = 0x0100;
     private readonly Func<AppSettings> _getSettings;
     private readonly Action<AppSettings> _saveSettings;
     private bool _disposed;
@@ -208,15 +184,25 @@ internal sealed class FontZoomMessageFilter : IMessageFilter, IDisposable
 
     public bool PreFilterMessage(ref Message message)
     {
-        if (_disposed || message.Msg != WmMouseWheel) return false;
+        return HandleMessage(ref message, Control.ModifierKeys);
+    }
+
+    internal bool HandleMessage(ref Message message, Keys modifiers)
+    {
+        // Wheel, key-up, IME composition and unrelated shortcuts keep their original route.
+        if (_disposed || message.Msg != WmKeyDown) return false;
         var target = Control.FromHandle(message.HWnd);
         if (target?.FindForm() is null) return false;
-        var controlPressed = (Control.ModifierKeys & Keys.Control) == Keys.Control;
-        if (!UiFontManager.ShouldZoom(target, controlPressed)) return false;
-        var delta = unchecked((short)(((long)message.WParam >> 16) & 0xffff));
-        if (delta == 0) return false;
-        UiFontManager.Change(_getSettings(), Math.Sign(delta), _saveSettings);
+        var step = ZoomStep((Keys)message.WParam.ToInt32(), modifiers);
+        if (step == 0) return false;
+        UiFontManager.Change(_getSettings(), step, _saveSettings);
         return true;
+    }
+
+    internal static int ZoomStep(Keys key, Keys modifiers)
+    {
+        if ((modifiers & Keys.Control) == 0 || (modifiers & Keys.Alt) != 0) return 0;
+        return key switch { Keys.Oemplus or Keys.Add => 1, Keys.OemMinus or Keys.Subtract => -1, _ => 0 };
     }
 
     public void Dispose()

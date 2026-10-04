@@ -106,7 +106,10 @@ public sealed class V110Tests : IDisposable
             using var main = new global::WebSiteMonitor.MainForm(db, engine, scheduler, sound, () => new AppSettings { UiFontSize = fontSize }, _ => { }, () => { }, _ => { });
             main.Show(); Application.DoEvents();
             var menu = Descendants(main).OfType<ToolStrip>().SelectMany(s => s.Items.OfType<ToolStripDropDownButton>()).Single();
-            Assert.Equal(new[] { "設定をエクスポート", "設定をインポート" }, menu.DropDownItems.Cast<ToolStripItem>().Select(i => i.Text));
+            Assert.Equal(new[] { "設定をエクスポート", "設定をインポート", "エクスポート用パスワードを変更", "記憶したパスワードを解除" }, menu.DropDownItems.Cast<ToolStripItem>().Select(i => i.Text));
+            var restart = Descendants(main).OfType<ToolStrip>().SelectMany(strip => strip.Items.Cast<ToolStripItem>()).Single(item => item.Text == "再起動");
+            Assert.False(restart.IsOnOverflow); Assert.True(restart.Available);
+            Assert.True(restart.GetCurrentParent()!.ClientRectangle.Contains(restart.Bounds));
             main.Close();
         });
     }
