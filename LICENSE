@@ -1,0 +1,16 @@
+WebSite Monitor — original project code
+
+Copyright (c) 2026 WebSite Monitor copyright holders.
+All rights reserved.
+
+The project owner has chosen to retain rights to the original project code.
+No MIT, Apache, GPL, or other open-source license is granted for that code.
+Any use, modification, or redistribution requiring permission must be
+authorized by the applicable copyright holders. This statement does not
+limit rights that cannot be excluded under applicable law.
+
+Third-party software is excluded from this reservation. Its respective
+copyrights and licenses continue to apply. See THIRD_PARTY_NOTICES.md.
+FFmpeg is an independently obtained external tool, not distributed here. This
+reservation does not restrict rights granted under the licenses of FFmpeg,
+.NET, SQLite, or the other third-party components.

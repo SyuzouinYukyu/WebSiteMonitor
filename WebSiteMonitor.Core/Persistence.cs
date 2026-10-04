@@ -5,6 +5,7 @@ namespace WebSiteMonitor.Core;
 public sealed class SettingsStore
 {
     private readonly string _path;
+    private readonly object _sync = new();
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
     public string? RecoveryMessage { get; private set; }
     public SettingsStore(string path) => _path = path;
@@ -28,11 +29,45 @@ public sealed class SettingsStore
 
     public void Save(AppSettings settings)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        var temp = _path + ".tmp";
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(settings, JsonOptions);
-        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
-        File.Move(temp, _path, true);
+        lock (_sync) WriteAtomic(_path, JsonSerializer.SerializeToUtf8Bytes(settings, JsonOptions));
+    }
+
+    // Keep the exact original settings bytes in memory until SQLite commits. Nothing is exported
+    // in plaintext. A failed write or failed DB commit restores the file as well as the transaction.
+    public void SaveCoordinated(AppSettings settings, Action<Action> databaseTransaction)
+    {
+        lock (_sync)
+        {
+            var previous = File.Exists(_path) ? File.ReadAllBytes(_path) : null;
+            var attempted = false;
+            try { databaseTransaction(() => { attempted = true; Save(settings); }); }
+            catch
+            {
+                if (attempted)
+                {
+                    try
+                    {
+                        if (previous is null) { if (File.Exists(_path)) File.Delete(_path); }
+                        else if (!File.Exists(_path) || !File.ReadAllBytes(_path).AsSpan().SequenceEqual(previous)) WriteAtomic(_path, previous);
+                    }
+                    catch { throw new ConfigurationException("取り込みを中止しましたが、設定ファイルの復元に失敗しました。保存先の状態を確認してください。アプリを終了せず復旧してください。"); }
+                }
+                throw;
+            }
+        }
+    }
+
+    public static void WriteAtomic(string path, byte[] bytes)
+    {
+        path = Path.GetFullPath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var temp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var stream = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None)) { stream.Write(bytes); stream.Flush(true); }
+            File.Move(temp, path, true);
+        }
+        finally { if (File.Exists(temp)) File.Delete(temp); }
     }
 }
 
@@ -40,19 +75,23 @@ public sealed class FileLogger
 {
     private readonly string _directory;
     private readonly object _sync = new();
-    public FileLogger(string directory) { _directory = directory; Directory.CreateDirectory(directory); }
+    public FileLogger(string directory) { _directory = directory; try { Directory.CreateDirectory(directory); } catch { } }
     public void Info(string message) => Write("INFO", message);
-    public void Error(string message, Exception? exception = null) => Write("ERROR", exception is null ? message : message + " | " + exception.GetType().Name + ": " + exception.Message);
+    public void Error(string message, Exception? exception = null) => Write("ERROR", exception is null ? message : message + " | " + NotificationUrl.SafeException(exception));
     private void Write(string level, string message)
     {
-        lock (_sync)
+        try
         {
-            Directory.CreateDirectory(_directory);
-            var path = Path.Combine(_directory, DateTime.Now.ToString("yyyy-MM-dd") + ".log");
-            if (File.Exists(path) && new FileInfo(path).Length > 10 * 1024 * 1024) path = Path.Combine(_directory, DateTime.Now.ToString("yyyy-MM-dd-HHmmss") + ".log");
-            File.AppendAllText(path, $"{DateTimeOffset.Now:O} [{level}] {message.ReplaceLineEndings(" ")}
-");
+            var safeMessage = NotificationUrl.RedactText(message);
+            lock (_sync)
+            {
+                Directory.CreateDirectory(_directory);
+                var path = Path.Combine(_directory, DateTime.Now.ToString("yyyy-MM-dd") + ".log");
+                if (File.Exists(path) && new FileInfo(path).Length > 10 * 1024 * 1024) path = Path.Combine(_directory, DateTime.Now.ToString("yyyy-MM-dd-HHmmss") + ".log");
+                File.AppendAllText(path, $"{DateTimeOffset.Now:O} [{level}] {safeMessage.ReplaceLineEndings(" ")}\n");
+            }
         }
+        catch { /* Diagnostics must not interrupt monitoring, including storage failures. */ }
     }
-    public void Cleanup(int days) { var cutoff = DateTime.Now.AddDays(-Math.Clamp(days,1,3650)); foreach (var f in Directory.EnumerateFiles(_directory,"*.log")) { try { if (File.GetLastWriteTime(f) < cutoff) File.Delete(f); } catch { } } }
+    public void Cleanup(int days) { try { var cutoff = DateTime.Now.AddDays(-Math.Clamp(days,1,3650)); foreach (var f in Directory.EnumerateFiles(_directory,"*.log")) { try { if (File.GetLastWriteTime(f) < cutoff) File.Delete(f); } catch { } } } catch { } }
 }

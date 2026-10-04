@@ -9,10 +9,11 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <AssemblyName>WebSiteMonitor</AssemblyName>
     <RootNamespace>WebSiteMonitor</RootNamespace>
-    <Product>WebSiteMonitor</Product>
-    <Version>1.0.4</Version>
-    <FileVersion>1.0.4.0</FileVersion>
-    <AssemblyVersion>1.0.4.0</AssemblyVersion>
+    <Product>WebSite Monitor</Product>
+    <AssemblyTitle>WebSite Monitor</AssemblyTitle>
+    <Version>1.1.0</Version>
+    <FileVersion>1.1.0.0</FileVersion>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <ApplicationIcon>..\Resources\WebSiteMonitor.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>
@@ -28,7 +29,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\Resources\WebSiteMonitor.ico" Link="Resources\WebSiteMonitor.ico" />
-    <EmbeddedResource Include="Resources\ffmpeg-win64-lgpl-shared.zip" LogicalName="WebSiteMonitor.Resources.ffmpeg-win64-lgpl-shared.zip" />
     <EmbeddedResource Include="..\THIRD_PARTY_NOTICES.md" Link="Resources\THIRD_PARTY_NOTICES.md" LogicalName="WebSiteMonitor.Resources.THIRD_PARTY_NOTICES.md" />
   </ItemGroup>
 </Project>

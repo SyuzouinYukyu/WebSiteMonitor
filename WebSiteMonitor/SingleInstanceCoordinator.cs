@@ -4,7 +4,7 @@ namespace WebSiteMonitor;
 
 internal sealed class SingleInstanceCoordinator : IDisposable
 {
-    private const string MutexName = "Local\WebSiteMonitor.App.Instance";
+    private const string MutexName = "Local\\WebSiteMonitor.App.Instance";
     private const string PipeName = "WebSiteMonitor.App.Command";
     private readonly Mutex _mutex;
     private readonly CancellationTokenSource _stop = new();

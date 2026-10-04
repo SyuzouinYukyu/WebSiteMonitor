@@ -11,9 +11,11 @@ public sealed class Site
     public long MonitorRevision { get; set; }
     public string Name { get; set; } = "";
     public string Url { get; set; } = "";
+    public string? NotificationTargetUrl { get; set; }
     public bool UseBrowserCompatibleUserAgent { get; set; }
     public bool Enabled { get; set; } = true;
     public MonitorMode MonitorMode { get; set; } = MonitorMode.Auto;
+    // This is explicitly configured by the user for Feed mode. Auto discovery is isolated below.
     public string? FeedUrl { get; set; }
     public string? AutoDetectedFeedUrl { get; set; }
     public string? Selector { get; set; }
@@ -24,9 +26,10 @@ public sealed class Site
     public string DailyTime { get; set; } = "09:00";
     public bool WindowsNotification { get; set; } = true;
     public bool PopupNotification { get; set; }
+    public bool UpdateDialogNotification { get; set; } = true;
     public bool SoundNotification { get; set; }
     public string? SoundFile { get; set; }
-    public int SoundVolume { get; set; } = 80;
+    public int SoundVolume { get; set; } = 100;
     public string? LastHash { get; set; }
     public string? LastPreview { get; set; }
     public string? LastETag { get; set; }
@@ -44,15 +47,16 @@ public sealed record HistoryEntry(long Id, long SiteId, string SiteName, DateTim
     string? OldHash, string NewHash, string? OldPreview, string NewPreview, string Url);
 
 public sealed record ExtractionResult(string Content, MonitorMode EffectiveMode, string? DetectedFeedUrl = null);
+public sealed record PendingUpdateDialog(long Id, long SiteId, DateTimeOffset CreatedAt, string Url);
 public sealed record HttpFetchResult(int StatusCode, byte[]? Body, string? MediaType, string? CharacterSet,
     string? ETag, string? LastModified, Uri FinalUri, bool NotModified = false);
 public sealed record CheckResult(CheckOutcome Outcome, Site Site, string Message, string? NewHash = null,
-    string? NewPreview = null, bool ShouldNotify = false, long MonitorRevision = 0);
+    string? NewPreview = null, bool ShouldNotify = false, long MonitorRevision = 0, string? NotificationTargetUrl = null);
 
 public sealed class AppSettings
 {
-    public double UiFontSize { get; set; } = 10.0;
-    public int WindowX { get; set; } = -1;
+        public double UiFontSize { get; set; } = 10.0;
+public int WindowX { get; set; } = -1;
     public int WindowY { get; set; } = -1;
     public int WindowWidth { get; set; } = 1180;
     public int WindowHeight { get; set; } = 720;
@@ -79,6 +83,7 @@ public static class SiteValidation
     {
         if (string.IsNullOrWhiteSpace(site.Name)) throw new ArgumentException("サイト名を入力してください。");
         ValidateHttpUrl(site.Url, "URL");
+        if (!string.IsNullOrWhiteSpace(site.NotificationTargetUrl)) NotificationUrl.ValidateExplicit(site.NotificationTargetUrl);
         if (!string.IsNullOrWhiteSpace(site.FeedUrl)) ValidateHttpUrl(site.FeedUrl, "RSS / Atom URL");
         if (site.IntervalMinutes is < 5 or > 10080) throw new ArgumentException("確認間隔は5～10080分で指定してください。");
         if (!TimeOnly.TryParseExact(site.DailyTime, "HH:mm", out _)) throw new ArgumentException("毎日の時刻は HH:mm 形式で指定してください。");
@@ -113,7 +118,6 @@ public static class SiteValidation
            || previous.IntervalMinutes != current.IntervalMinutes
            || !string.Equals(previous.DailyTime, current.DailyTime, StringComparison.Ordinal)
            || previous.Enabled != current.Enabled;
-
     public static Uri ValidateHttpUrl(string? value, string label = "URL")
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))

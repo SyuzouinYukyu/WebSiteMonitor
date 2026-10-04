@@ -23,7 +23,7 @@ internal static class UiProbeApplication
             var totalSites = Math.Clamp(siteCount, 1, 100);
             for (var index = 1; index <= totalSites; index++)
             {
-                var current = new Site { Name = index == 1 ? "表示確認用サイト" : $"表示確認用サイト {index:000}", Url = "https://example.test/", MonitorMode = MonitorMode.Text, IntervalMinutes = 60, DailyTime = "09:00" };
+                var current = new Site { Name = index == 1 ? "表示確認用サイト" : $"表示確認用サイト {index:000}", Url = "https://example.test/", UpdateDialogNotification = true, MonitorMode = MonitorMode.Text, IntervalMinutes = 60, DailyTime = "09:00" };
                 database.SaveSite(current);
             }
             var site = database.GetSites().First();
@@ -33,6 +33,7 @@ internal static class UiProbeApplication
             using var fetcher = new SharedHttpFetcher();
             using var scheduler = new OneShotScheduler(database, new MonitorEngine(database, fetcher, logger));
             using var sound = new SoundService();
+            using var dialogs = new UpdateDialogController(database, logger, _ => { }, SynchronizationContext.Current ?? new WindowsFormsSynchronizationContext());
             void Save(AppSettings value) { settings = value; settingsStore.Save(value); }
             void ShowSettings()
             {
@@ -41,7 +42,7 @@ internal static class UiProbeApplication
             }
 
             using var form = new MainForm(database, new MonitorEngine(database, fetcher, logger), scheduler, sound, () => settings, Save, ShowSettings, _ => { });
-            form.Text = "WebSiteMonitor v1.0.4 — UI検査";
+            form.Text = "WebSite Monitor v1.1.0 — UI検査";
             form.AllowExit();
             form.Shown += (_, _) =>
             {
@@ -50,11 +51,14 @@ internal static class UiProbeApplication
                 childForms.Add(new SiteEditForm(site, new MonitorEngine(database, fetcher, logger), sound, settings, paths.SoundsDirectory));
                 childForms.Add(new HistoryForm(database, site.Id, _ => { }));
                 childForms.Add(new AboutForm());
+                childForms.Add(new ConfigurationPasswordDialog(true, settings.UiFontSize));
+                childForms.Add(new ConfigurationImportDialog(totalSites, settings.UiFontSize));
                 foreach (var child in childForms) child.Show(form);
                 new UpdatePopup(new Site { Name = "表示確認用ポップアップ", Url = "https://example.test/" }, _ => { }).Show(form);
+                dialogs.TryShowNext();
                 if (autoCloseAfter is not { } duration) return;
                 var timer = new System.Windows.Forms.Timer { Interval = Math.Clamp((int)duration.TotalMilliseconds, 1000, 60000) };
-                timer.Tick += (_, _) => { timer.Stop(); timer.Dispose(); form.Close(); };
+                timer.Tick += (_, _) => { timer.Stop(); timer.Dispose(); dialogs.Dispose(); form.Close(); };
                 form.FormClosed += (_, _) => timer.Dispose();
                 timer.Start();
             };

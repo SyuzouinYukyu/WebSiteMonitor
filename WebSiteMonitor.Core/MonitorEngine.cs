@@ -5,12 +5,14 @@ public sealed class MonitorEngine
     private readonly Database _database;
     private readonly IHttpFetcher _fetcher;
     private readonly FileLogger _logger;
+    private readonly Func<bool> _notificationsEnabled;
 
-    public MonitorEngine(Database database, IHttpFetcher fetcher, FileLogger logger)
+    public MonitorEngine(Database database, IHttpFetcher fetcher, FileLogger logger, Func<bool>? notificationsEnabled = null)
     {
         _database = database;
         _fetcher = fetcher;
         _logger = logger;
+        _notificationsEnabled = notificationsEnabled ?? (() => true);
     }
 
     public async Task<CheckResult> CheckAsync(Site requestedSite, CancellationToken cancellationToken)
@@ -38,7 +40,7 @@ public sealed class MonitorEngine
             }
             catch (Exception ex) when (usingAutoDetectedFeed && !cancellationToken.IsCancellationRequested)
             {
-                _logger.Info($"自動検出Feedが無効なため本文へフォールバック SiteId={site.Id}: {ex.Message}");
+                _logger.Info($"自動検出Feedが無効なため本文へフォールバック SiteId={site.Id}: {NotificationUrl.SafeException(ex)}");
                 usingAutoDetectedFeed = false;
                 updateAutoDetectedFeed = true;
                 fetched = await _fetcher.FetchAsync(SiteValidation.ValidateHttpUrl(site.Url), null, null, site.UseBrowserCompatibleUserAgent, cancellationToken).ConfigureAwait(false);
@@ -61,11 +63,13 @@ public sealed class MonitorEngine
             }
 
             var effective = site.MonitorMode;
+            string? notificationFeed = null;
             string content;
             if (site.MonitorMode == MonitorMode.Feed || (site.MonitorMode == MonitorMode.Auto && FeedParser.LooksLikeFeed(fetched.MediaType, text)))
             {
                 content = FeedParser.ParseAndNormalize(text);
                 effective = MonitorMode.Feed;
+                notificationFeed = text;
             }
             else if (site.MonitorMode == MonitorMode.Auto)
             {
@@ -75,7 +79,8 @@ public sealed class MonitorEngine
                     try
                     {
                         var feed = await _fetcher.FetchAsync(new Uri(detected), null, null, site.UseBrowserCompatibleUserAgent, cancellationToken).ConfigureAwait(false);
-                        content = FeedParser.ParseAndNormalize(SharedHttpFetcher.DecodeBody(feed));
+                        notificationFeed = SharedHttpFetcher.DecodeBody(feed);
+                        content = FeedParser.ParseAndNormalize(notificationFeed);
                         effective = MonitorMode.Feed;
                         updateAutoDetectedFeed = true;
                         autoDetectedFeedUrl = detected;
@@ -83,7 +88,7 @@ public sealed class MonitorEngine
                     }
                     catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
                     {
-                        _logger.Info($"検出Feedが無効なため本文へフォールバック SiteId={site.Id}: {ex.Message}");
+                        _logger.Info($"検出Feedが無効なため本文へフォールバック SiteId={site.Id}: {NotificationUrl.SafeException(ex)}");
                         content = ContentExtractor.ExtractText(text);
                         effective = MonitorMode.Text;
                     }
@@ -100,7 +105,8 @@ public sealed class MonitorEngine
             }
 
             var hash = ContentHasher.Sha256(content);
-            var result = _database.ApplySuccess(site.Id, revision, hash, ContentHasher.Preview(content), fetched.ETag, fetched.LastModified, effective, now, updateAutoDetectedFeed, autoDetectedFeedUrl);
+            var result = _database.ApplySuccess(site.Id, revision, hash, ContentHasher.Preview(content), fetched.ETag, fetched.LastModified, effective, now, updateAutoDetectedFeed, autoDetectedFeedUrl,
+                _notificationsEnabled(), NotificationUrl.ForSite(site));
             if (result.Outcome == CheckOutcome.Discarded)
             {
                 _logger.Info($"監視設定変更のため取得結果を破棄 SiteId={site.Id}");
@@ -117,7 +123,7 @@ public sealed class MonitorEngine
         {
             var error = ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden } && !site.UseBrowserCompatibleUserAgent
                 ? "403 Forbidden：必要に応じて『ブラウザー互換User-Agentを使用する』を試してください。"
-                : ex.Message;
+                : NotificationUrl.SafeException(ex);
             if (!_database.ApplyError(site.Id, revision, error, now)) return Discarded(site.Id);
             _logger.Error($"監視失敗 SiteId={site.Id} Name={site.Name}", ex);
             return new CheckResult(CheckOutcome.Failed, site, error, MonitorRevision: revision);

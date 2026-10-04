@@ -19,6 +19,10 @@ internal static class Program
             if (args.Contains("--self-test", StringComparer.OrdinalIgnoreCase))
             {
                 var database = new Database(paths.DatabasePath); database.Initialize();
+                var resources = typeof(Program).Assembly.GetManifestResourceNames();
+                if (resources.Any(name => name.Contains("ffmpeg", StringComparison.OrdinalIgnoreCase))) throw new InvalidOperationException("不要なFFmpegリソースが存在します。");
+                if (!resources.Contains("WebSiteMonitor.Resources.THIRD_PARTY_NOTICES.md")) throw new InvalidOperationException("ライセンスリソースが見つかりません。");
+                File.WriteAllLines(Path.Combine(paths.DataDirectory, "SELF_TEST_RESOURCES.txt"), resources);
                 File.WriteAllText(Path.Combine(paths.DataDirectory, "SELF_TEST_OK"), "SELF_TEST_OK");
                 return;
             }
@@ -33,7 +37,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show("WebSiteMonitorを起動できません。\n\n" + ex.Message, "WebSiteMonitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("WebSite Monitorを起動できません。\n\n" + NotificationUrl.RedactText(ex.Message), "WebSite Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 private static int? ReadUiProbeWidth(IEnumerable<string> args)
@@ -66,7 +70,7 @@ internal sealed record AppPaths(string BaseDirectory, string DataDirectory, stri
             var probe = Path.Combine(result.CacheDirectory, ".write-test-" + Environment.ProcessId);
             File.WriteAllText(probe, "ok"); File.Delete(probe);
         }
-        catch (Exception ex) { throw new IOException("アプリのフォルダーへ書き込めません。書き込み可能な場所へWebSiteMonitorを移動してください。", ex); }
+        catch (Exception ex) { throw new IOException("アプリのフォルダーへ書き込めません。書き込み可能な場所へWebSite Monitorを移動してください。", ex); }
         return result;
     }
 }

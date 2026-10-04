@@ -16,7 +16,7 @@ internal static class ShortcutInstaller
         {
             link.SetPath(exePath);
             link.SetWorkingDirectory(Path.GetDirectoryName(exePath)!);
-            link.SetDescription("WebSiteMonitor");
+            link.SetDescription("WebSite Monitor");
             link.SetIconLocation(exePath, 0);
             var store = (IPropertyStore)link;
             var value = new PropVariant { ValueType = (ushort)VarEnum.VT_LPWSTR, PointerValue = Marshal.StringToCoTaskMemUni(appUserModelId) };

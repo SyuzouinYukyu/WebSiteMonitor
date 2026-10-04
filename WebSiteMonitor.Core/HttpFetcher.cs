@@ -36,7 +36,7 @@ public sealed class SharedHttpFetcher : IHttpFetcher, IDisposable
             UseProxy = true
         };
         _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        _client.DefaultRequestHeaders.UserAgent.ParseAdd("WebSiteMonitor/1.0.4 (+Windows 11; portable monitor)");
+        _client.DefaultRequestHeaders.UserAgent.ParseAdd("WebSiteMonitor/1.1.0 (+Windows 11; portable monitor)");
         _ownsClient = true;
     }
 
@@ -124,7 +124,7 @@ public sealed class SharedHttpFetcher : IHttpFetcher, IDisposable
     private static Encoding? TryGetEncoding(string? name)
     {
         if (string.IsNullOrWhiteSpace(name)) return null;
-        var normalized = name.Trim().Trim('"', ''').ToLowerInvariant();
+        var normalized = name.Trim().Trim('"', '\'').ToLowerInvariant();
         if (normalized is "windows-31j" or "windows31j" or "shift_jis" or "shift-jis" or "ms932") return Encoding.GetEncoding(932);
         if (normalized is "euc-jp" or "euc_jp") return Encoding.GetEncoding(51932);
         try { return Encoding.GetEncoding(normalized); }

@@ -20,7 +20,7 @@ internal static class WindowsIntegration
         {
             SetCurrentProcessExplicitAppUserModelID(AppId);
             using var appId = Registry.CurrentUser.CreateSubKey(@"Software\Classes\AppUserModelId\" + AppId);
-            appId?.SetValue("DisplayName", "WebSiteMonitor"); appId?.SetValue("IconUri", exePath);
+            appId?.SetValue("DisplayName", "WebSite Monitor"); appId?.SetValue("IconUri", exePath);
             CreateShortcut(exePath);
         }
         catch (Exception ex) { logger.Error("Windows通知統合の登録に失敗しました", ex); }
@@ -54,16 +54,22 @@ internal sealed class NotificationService
         _logger = logger;
     }
 
-    public void Show(Site site)
+    internal static string CreateToastXml(Site site, string? notificationUrl = null)
+    {
+        var safeUrl = NotificationUrl.Sanitize(notificationUrl ?? NotificationUrl.ForSite(site));
+        var activation = safeUrl.Length == 0 ? "" : $" activationType=\"protocol\" launch=\"{SecurityElement.Escape(safeUrl)}\"";
+        var title = SecurityElement.Escape("Webサイトが更新されました");
+        var name = SecurityElement.Escape(NotificationUrl.RedactText(site.Name));
+        var message = SecurityElement.Escape($"変更を検出しました  {DateTime.Now:yyyy/MM/dd HH:mm}");
+        return $"<toast{activation}><visual><binding template=\"ToastGeneric\"><text>{title}</text><text>{name}</text><text>{message}</text></binding></visual><audio silent=\"true\"/></toast>";
+    }
+
+    public void Show(Site site, string? notificationUrl = null)
     {
         try
         {
-            var title = SecurityElement.Escape("Webサイトが更新されました");
-            var name = SecurityElement.Escape(site.Name);
-            var message = SecurityElement.Escape($"変更を検出しました  {DateTime.Now:yyyy/MM/dd HH:mm}");
-            var launch = SecurityElement.Escape(site.Url);
             var xml = new XmlDocument();
-            xml.LoadXml($"<toast activationType=\"protocol\" launch=\"{launch}\"><visual><binding template=\"ToastGeneric\"><text>{title}</text><text>{name}</text><text>{message}</text></binding></visual><audio silent=\"true\"/></toast>");
+            xml.LoadXml(CreateToastXml(site, notificationUrl));
             ToastNotificationManager.CreateToastNotifier(WindowsIntegration.AppId).Show(new ToastNotification(xml));
         }
         catch (Exception ex) { _logger.Error($"Windows通知に失敗しました SiteId={site.Id}", ex); }
