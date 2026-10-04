@@ -35,6 +35,12 @@ internal static class WindowsIntegration
     public static void SetAutoStart(bool enabled, string exePath)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKey, true);
+        SetAutoStart(enabled, exePath, key);
+    }
+
+    // Tests use a private non-startup registry key; the production path is unchanged.
+    internal static void SetAutoStart(bool enabled, string exePath, RegistryKey? key)
+    {
         if (enabled) key?.SetValue("WebSiteMonitor", $"\"{exePath}\" --autostart"); else key?.DeleteValue("WebSiteMonitor", false);
     }
 
@@ -59,7 +65,7 @@ internal sealed class NotificationService
         var safeUrl = NotificationUrl.Sanitize(notificationUrl ?? NotificationUrl.ForSite(site));
         var activation = safeUrl.Length == 0 ? "" : $" activationType=\"protocol\" launch=\"{SecurityElement.Escape(safeUrl)}\"";
         var title = SecurityElement.Escape("Webサイトが更新されました");
-        var name = SecurityElement.Escape(NotificationUrl.RedactText(site.Name));
+        var name = SecurityElement.Escape(DisplayText.Content(site.Name));
         var message = SecurityElement.Escape($"変更を検出しました  {DateTime.Now:yyyy/MM/dd HH:mm}");
         return $"<toast{activation}><visual><binding template=\"ToastGeneric\"><text>{title}</text><text>{name}</text><text>{message}</text></binding></visual><audio silent=\"true\"/></toast>";
     }

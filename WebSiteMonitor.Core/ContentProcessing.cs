@@ -14,6 +14,19 @@ public static class ContentHasher
 {
     public static string Sha256(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     public static string Preview(string value, int max = 4096) => value.Length <= max ? value : value[..max];
+
+    // Display is not the monitoring baseline: hash the original content, but never show
+    // raw HTML attributes/scripts. Redact before truncating quoted keys or values.
+    public static string SafePreview(string value, MonitorMode mode, int max = 4096)
+    {
+        try
+        {
+            var display = mode == MonitorMode.FullPage ? ContentExtractor.ExtractText(value) : value;
+            var bounded = Preview(display, 65536);
+            return Preview(NotificationUrl.RedactText(bounded), max);
+        }
+        catch { return "[DIAGNOSTIC_REDACTED]"; }
+    }
 }
 
 public static class ContentExtractor

@@ -23,7 +23,10 @@ internal sealed class ConfigurationPasswordDialog : Form
             if (control is Label label) label.UseCompatibleTextRendering = false;
             table.RowStyles.Add(new RowStyle(SizeType.AutoSize)); control.Margin = new Padding(4, 8, 4, 8); table.Controls.Add(control);
         }
-        Add(new Label { Text = "8文字以上のパスワードを入力してください。\nパスワードは保存・記録しません。紛失すると復元できません。", AutoSize = true, MaximumSize = new Size(680, 0), Padding = new Padding(0, 0, 0, 8) });
+        Add(new Label { Text = exporting
+            ? "8文字以上のパスワードを入力してください。\nエクスポート成功後、Windowsユーザー専用のDPAPIで暗号化して記憶します。\n過去のバックアップには作成時のパスワードが必要です。"
+            : "8文字以上のパスワードを入力してください。\nこのファイルを暗号化したパスワードが必要です。入力した値は記憶しません。",
+            AutoSize = true, MaximumSize = new Size(680, 0), Padding = new Padding(0, 0, 0, 8) });
         Add(new Label { Text = "パスワード", AutoSize = true });
         Add(_password);
         if (exporting) { Add(new Label { Text = "パスワード（確認）", AutoSize = true }); Add(_confirm); }
@@ -32,7 +35,7 @@ internal sealed class ConfigurationPasswordDialog : Form
         var ok = new Button { Text = "続行", AutoSize = true };
         ok.Click += (_, _) =>
         {
-            if (Password.Length < ConfigurationTransfer.MinimumPasswordLength || exporting && Password != _confirm.Text)
+            if (!ExportPasswordStore.IsValid(Password) || exporting && Password != _confirm.Text)
             { MessageBox.Show(this, "8文字以上で指定し、確認入力を一致させてください。", Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
             DialogResult = DialogResult.OK;
         };

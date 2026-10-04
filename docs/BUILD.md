@@ -6,11 +6,11 @@
 - .NET 10 SDK
 - PowerShell 7 推奨
 
-## 📦 FFmpeg リソースについて
+## 📦 FFmpeg について
 
-公式配布EXEには BtbN FFmpeg-Builds の Windows x64 LGPL shared build を埋め込んでいます。
+v1.1.4のEXEと公開ソースにはFFmpegの実行ファイル・DLL・ZIPを同梱しません。圧縮音声などの通知音を利用する場合は、利用者が別途FFmpegを導入し、`ffmpeg.exe` のある絶対パスのディレクトリをPATHへ登録してください。自動取得・インストールは行いません。FFmpegがなくても監視や音声以外の通知は継続します。
 
-GitHubリポジトリには、容量の大きい第三者バイナリをGit履歴へ恒久的に含めないため、次のファイルを収録していません。
+以下はv1.0.4以前の埋め込み方式に関する履歴であり、v1.1.4のビルド要件ではありません。GitHubリポジトリには次の旧版用ZIPを収録していません。
 
 ```text
 WebSiteMonitor/Resources/ffmpeg-win64-lgpl-shared.zip
@@ -25,10 +25,10 @@ SHA-256:        40633DAB97D235F7DE4FF5B8E34E80D778D4E89F97EFB142B081127F3D7C8633
 Cache ID:       btbn-lgpl-shared-20260915
 ```
 
-完全なReleaseビルドおよびFFmpeg統合テストを再現する場合は、上記SHA-256と一致するリソースを `WebSiteMonitor/Resources/` に配置してください。
+v1.1.4のビルドに上記ZIPの配置は不要です。
 
 > [!NOTE]
-> FFmpegの由来・ライセンス・実行時展開方式は `THIRD_PARTY_NOTICES.md` と `WebSiteMonitor/SoundService.cs` で確認できます。
+> 現行版の外部FFmpeg方針と第三者ライセンスは `README.md` と `THIRD_PARTY_NOTICES.md` を確認してください。
 
 ## 🧱 ビルド
 
@@ -41,13 +41,13 @@ dotnet build .\WebSiteMonitor.sln -c Release
 
 ## 🧪 テスト
 
-FFmpeg リソースを配置した完全なソースツリーで実行します。
+ソースツリーで実行します。外部FFmpegを使う統合テストの条件は各テストの記述に従ってください。
 
 ```powershell
 dotnet test .\WebSiteMonitor.sln -c Release --no-build
 ```
 
-v1.0.4 正規ソースでは合計115件のテストが成功し、失敗0・スキップ0を確認しています。
+v1.1.4の最終ソースでは334件のテスト成功を確認しています。詳細と物理GUI操作の未検証範囲は `RELEASE_VERIFICATION.md` を参照してください。
 
 ## 📤 single-file Release
 
@@ -62,12 +62,12 @@ dotnet publish .\WebSiteMonitor\WebSiteMonitor.csproj `
   -o .\publish
 ```
 
-## 🔎 正規 v1.0.4 の確認値
+## 🔎 正規 v1.1.4 の確認値
 
 ```text
-WebSiteMonitor_v1.0.4.exe
-SHA-256: 63F6484ACFDBF43EDDA4F43C576C49B787EF3E9B0AA5F3DEE4D6D04780341F63
-Size:     222,545,532 bytes
+WebSiteMonitor_v1.1.4.exe
+SHA-256: 0A8067201D94A6FCB15A58E3F9EA5E0181E013ED63332240368E7B1ABD01B724
+Size:     145,733,756 bytes
 ```
 
 ## 🔐 公開時の注意

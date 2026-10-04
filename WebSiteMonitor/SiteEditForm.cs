@@ -39,6 +39,10 @@ internal sealed class SiteEditForm : Form
     private readonly TextBox _preview = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill };
     private readonly TableLayoutPanel _details = new() { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(0, 4, 0, 4) };
     private readonly Dictionary<Control, Label> _detailLabels = [];
+    private CancellationTokenSource? _testCancellation;
+    private Task _activeTest = Task.CompletedTask;
+    private static readonly HashSet<SiteEditForm> RunningTests = [];
+    internal Task ActiveMonitorTest => _activeTest;
 
     public Site Value { get; private set; }
 
@@ -53,7 +57,7 @@ internal sealed class SiteEditForm : Form
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Yu Gothic UI", 9F);
         StartPosition = FormStartPosition.CenterParent;
-        MinimumSize = new Size(860, 760);
+        MinimumSize = new Size(860, 320);
         Size = new Size(980, 880);
 
         _mode.Items.AddRange([
@@ -61,7 +65,7 @@ internal sealed class SiteEditForm : Form
             new Choice<MonitorMode>(MonitorMode.Feed, "RSS / Atom"),
             new Choice<MonitorMode>(MonitorMode.FullPage, "ページ全体"),
             new Choice<MonitorMode>(MonitorMode.Text, "テキスト"),
-            new Choice<MonitorMode>(MonitorMode.CssSelector, "CSS Selector"),
+            new Choice<MonitorMode>(MonitorMode.CssSelector, "CSSセレクター"),
             new Choice<MonitorMode>(MonitorMode.XPath, "XPath"),
             new Choice<MonitorMode>(MonitorMode.Regex, "正規表現")
         ]);
@@ -71,8 +75,8 @@ internal sealed class SiteEditForm : Form
             new Choice<ScheduleMode>(ScheduleMode.Manual, "手動")
         ]);
 
-        var root = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Padding = new Padding(16), AutoScroll = true };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 155));
+        var root = new TableLayoutPanel { ColumnCount = 2, Padding = new Padding(16) };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddRootRow(root, "", _enabled);
         AddRootRow(root, "サイト名", FieldWithPaste(_name, false));
@@ -83,7 +87,7 @@ internal sealed class SiteEditForm : Form
         notificationDestination.Controls.Add(new Label { Text = "通知をクリックした際に開くURLです。認証付きRSS等では、トークンを含まない通常のページURLを指定してください。", AutoSize = true, MaximumSize = new Size(680, 0) }, 0, 2);
         AddRootRow(root, "", notificationDestination);
         AddRootRow(root, "", _browserUserAgent);
-        AddRootRow(root, "", new Label { Text = "403 Forbidden等で通常取得できないサイト向け。必要な場合のみ有効にします。", AutoSize = true, MaximumSize = new Size(680, 0) });
+        AddRootRow(root, "", new Label { Text = "HTTP 403：アクセスが拒否される等で通常取得できないサイト向け。必要な場合のみ有効にします。", AutoSize = true, MaximumSize = new Size(680, 0) });
         AddRootRow(root, "監視方式", _mode);
         BuildDetails();
         AddRootRow(root, "監視方式の詳細", _details);
@@ -97,32 +101,29 @@ internal sealed class SiteEditForm : Form
         root.Controls.Add(_test, 0, root.RowCount);
         root.SetColumnSpan(_test, 2);
         root.RowCount++;
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        _preview.MinimumSize = new Size(0, 170);
+        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.Controls.Add(_preview, 0, root.RowCount);
         root.SetColumnSpan(_preview, 2);
         root.RowCount++;
-        var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
+        var buttons = new FlowLayoutPanel { AutoSize = true, FlowDirection = FlowDirection.RightToLeft, WrapContents = false };
         var save = new Button { Text = "保存", AutoSize = true, DialogResult = DialogResult.None };
         var cancel = new Button { Text = "キャンセル", AutoSize = true, DialogResult = DialogResult.Cancel };
         save.Click += Save;
         buttons.Controls.AddRange([save, cancel]);
-        root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        root.Controls.Add(buttons, 0, root.RowCount);
-        root.SetColumnSpan(buttons, 2);
-        root.RowCount++;
-        Controls.Add(root);
+        ScrollableDialogLayout.Install(this, root, buttons, new Size(860, 320));
         AcceptButton = save;
         CancelButton = cancel;
         _mode.SelectedIndexChanged += (_, _) => UpdateInputs();
         _schedule.SelectedIndexChanged += (_, _) => UpdateInputs();
-        _test.Click += async (_, _) => await TestAsync();
+        _test.Click += async (_, _) => await RunMonitorTestAsync();
         LoadValues();
         UiFontManager.Apply(this, _settings.UiFontSize);
     }
 
     private void BuildDetails()
     {
-        _details.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140));
+        _details.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _details.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         AddDetail(_feedLabel, _feed);
         AddDetail(new Label { Text = "CSS Selector", AutoSize = true, Anchor = AnchorStyles.Left }, _selector);
@@ -287,23 +288,80 @@ internal sealed class SiteEditForm : Form
         }
     }
 
-    private async Task TestAsync()
+    internal Task RunMonitorTestAsync()
     {
+        if (_testCancellation is not null)
+        {
+            CancelMonitorTest();
+            return _activeTest;
+        }
+        if (IsDisposed || Disposing) return Task.CompletedTask;
+        var snapshot = Copy(ReadValues());
+        var cancellation = new CancellationTokenSource();
+        _testCancellation = cancellation;
+        RunningTests.Add(this);
+        _test.Text = "中止";
+        _preview.Text = "取得中…";
+        _activeTest = TestAsync(snapshot, cancellation);
+        return _activeTest;
+    }
+
+    internal void CancelMonitorTest()
+    {
+        _testCancellation?.Cancel();
+        if (!IsDisposed && !Disposing && _testCancellation is not null)
+        { _test.Text = "中止処理中…"; _test.Enabled = false; }
+    }
+
+    internal static Task CancelAndDrainTestsAsync()
+    {
+        var forms = RunningTests.ToArray();
+        foreach (var form in forms) form.CancelMonitorTest();
+        return Task.WhenAll(forms.Select(form => form._activeTest));
+    }
+
+    private async Task TestAsync(Site snapshot, CancellationTokenSource cancellation)
+    {
+        bool CanUpdate() => !IsDisposed && !Disposing && ReferenceEquals(_testCancellation, cancellation);
+        IProgress<string> progress = new Progress<string>(stage =>
+        { if (CanUpdate() && !cancellation.IsCancellationRequested) _preview.Text = "取得中… " + stage; });
         try
         {
-            _test.Enabled = false;
-            _preview.Text = "取得中…";
-            var result = await _engine.TestExtractAsync(ReadValues(), CancellationToken.None);
-            _preview.Text = $"実際の監視方式: {MainForm.ModeText(result.EffectiveMode)}\r\n\r\n{NotificationUrl.RedactText(ContentHasher.Preview(result.Content, 12000))}";
+            var display = await Task.Run(async () =>
+            {
+                var result = await _engine.TestExtractAsync(snapshot, cancellation.Token, progress, 12000).ConfigureAwait(false);
+                cancellation.Token.ThrowIfCancellationRequested();
+                return $"実際の監視方式: {MainForm.ModeText(result.EffectiveMode)}\r\n\r\n{DisplayText.Content(result.Content)}";
+            });
+            if (CanUpdate()) _preview.Text = display;
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        { if (CanUpdate()) _preview.Text = "監視テストを中止しました。"; }
+        catch (TimeoutException)
+        { if (CanUpdate()) _preview.Text = "タイムアウト: 監視テストが制限時間を超えました。"; }
         catch (Exception ex)
         {
-            _preview.Text = "エラー: " + NotificationUrl.RedactText(ex.Message);
+            if (CanUpdate()) _preview.Text = "エラー: " + DisplayText.Exception(ex);
         }
         finally
         {
-            _test.Enabled = true;
+            if (CanUpdate()) { _test.Enabled = true; _test.Text = "監視テスト / 抽出プレビュー"; }
+            if (ReferenceEquals(_testCancellation, cancellation)) _testCancellation = null;
+            RunningTests.Remove(this);
+            cancellation.Dispose();
         }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        base.OnFormClosing(e);
+        if (!e.Cancel) CancelMonitorTest();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing) _testCancellation?.Cancel();
+        base.Dispose(disposing);
     }
 
     private void Save(object? sender, EventArgs e)
@@ -319,7 +377,7 @@ internal sealed class SiteEditForm : Form
             if (!string.IsNullOrWhiteSpace(_notificationTargetUrl.Text) && NotificationUrl.Sanitize(_notificationTargetUrl.Text) != _notificationTargetUrl.Text.Trim())
                 _notificationTargetUrl.Focus();
             else FocusInvalidField();
-            MessageBox.Show(this, NotificationUrl.RedactText(ex.Message), "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, DisplayText.InputError(ex), "入力エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
     }
 
@@ -352,7 +410,7 @@ internal sealed class SiteEditForm : Form
         }
         catch (Exception ex)
         {
-            MessageBox.Show(this, "通知音をコピーできません: " + NotificationUrl.RedactText(ex.Message), "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, "通知音をコピーできません: " + DisplayText.Exception(ex), "エラー", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 
@@ -362,7 +420,7 @@ internal sealed class SiteEditForm : Form
         if (!Path.IsPathRooted(path)) path = Path.Combine(_soundsDirectory, path);
         var result = await _sound.PlayTestAsync(path, (int)_volume.Value, _settings);
         if (result.IsFailure)
-            MessageBox.Show(this, result.Message, "再生エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, DisplayText.SoundError(result), "再生エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
     }
 
     private static bool FilesEqual(string first, string second)

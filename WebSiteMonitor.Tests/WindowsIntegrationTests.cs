@@ -7,21 +7,22 @@ public sealed class WindowsIntegrationTests
     [Fact]
     public void AutoStartRegistryCanBeEnabledAndDisabled()
     {
-        const string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Run";
-        using var key = Registry.CurrentUser.CreateSubKey(keyPath, true)!;
-        var original = key.GetValue("WebSiteMonitor") as string;
+        var keyPath = @"Software\WebSiteMonitor.Tests\" + Guid.NewGuid().ToString("N");
+        using var actualRun = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Run");
+        var original = actualRun?.GetValue("WebSiteMonitor");
         try
         {
-            const string executable = @"C:\Portable Test\WebSiteMonitor.exe";
-            global::WebSiteMonitor.WindowsIntegration.SetAutoStart(true, executable);
+            using var key = Registry.CurrentUser.CreateSubKey(keyPath, true)!;
+            const string executable = @"C:\Portable Test\WebSiteMonitor_v1.1.3.exe";
+            global::WebSiteMonitor.WindowsIntegration.SetAutoStart(true, executable, key);
             Assert.Equal($"\"{executable}\" --autostart", key.GetValue("WebSiteMonitor") as string);
-            global::WebSiteMonitor.WindowsIntegration.SetAutoStart(false, executable);
+            global::WebSiteMonitor.WindowsIntegration.SetAutoStart(false, executable, key);
             Assert.Null(key.GetValue("WebSiteMonitor"));
         }
         finally
         {
-            if (original is null) key.DeleteValue("WebSiteMonitor", false);
-            else key.SetValue("WebSiteMonitor", original, RegistryValueKind.String);
+            Registry.CurrentUser.DeleteSubKeyTree(keyPath, false);
         }
+        Assert.Equal(original, actualRun?.GetValue("WebSiteMonitor"));
     }
 }

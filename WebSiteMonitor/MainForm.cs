@@ -16,10 +16,14 @@ internal sealed class MainForm : Form
     private readonly DataGridView _grid = new();
     private readonly ToolStripStatusLabel _status = new();
     private bool _allowExit;
+    private bool _shutdownLayoutSaved;
     private readonly Func<bool> _configurationBusy;
     private List<Site> _sites = [];
+    [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+    internal Func<Site, bool>? DeleteConfirmation { get; set; }
 
-    public MainForm(Database database, MonitorEngine engine, OneShotScheduler scheduler, SoundService sound, Func<AppSettings> getSettings, Action<AppSettings> saveSettings, Action showSettings, Action<string> openUrl, Func<bool, Task>? transferSettings = null, Func<bool>? configurationBusy = null)
+    public MainForm(Database database, MonitorEngine engine, OneShotScheduler scheduler, SoundService sound, Func<AppSettings> getSettings, Action<AppSettings> saveSettings, Action showSettings, Action<string> openUrl, Func<bool, Task>? transferSettings = null, Func<bool>? configurationBusy = null,
+        Func<Task>? restart = null, Action<bool>? manageExportPassword = null, Func<Task>? exit = null, Action? showLog = null)
     {
         _database = database;
         _engine = engine;
@@ -30,7 +34,7 @@ internal sealed class MainForm : Form
         _showSettings = showSettings;
         _openUrl = openUrl;
         _configurationBusy = configurationBusy ?? (() => false);
-        Text = "WebSite Monitor";
+        Text = ProductInfo.Title;
         AutoScaleMode = AutoScaleMode.Dpi;
         Font = new Font("Yu Gothic UI", 9F);
         StartPosition = FormStartPosition.Manual;
@@ -49,12 +53,19 @@ internal sealed class MainForm : Form
         AddToolButton(toolbar, "全て確認", async (_, _) => await _scheduler.CheckNowAsync(_database.GetSites().Where(s => s.Enabled)));
         AddToolButton(toolbar, "一時停止 / 再開", (_, _) => { _scheduler.TogglePause(); RefreshStatus(); });
         toolbar.Items.Add(new ToolStripSeparator());
-        AddToolButton(toolbar, "更新履歴", (_, _) => ShowHistory());
+        AddToolButton(toolbar, "更新履歴", (_, _) => ShowHistory(null));
+        AddToolButton(toolbar, "ログ", (_, _) => showLog?.Invoke());
         AddToolButton(toolbar, "設定", (_, _) => _showSettings());
         var transferMenu = new ToolStripDropDownButton("設定入出力") { AutoSize = true, DisplayStyle = ToolStripItemDisplayStyle.Text };
         transferMenu.DropDownItems.Add("設定をエクスポート", null, async (_, _) => { if (transferSettings is not null) await transferSettings(false); });
         transferMenu.DropDownItems.Add("設定をインポート", null, async (_, _) => { if (transferSettings is not null) await transferSettings(true); });
+        transferMenu.DropDownItems.Add("エクスポート用パスワードを変更", null, (_, _) => manageExportPassword?.Invoke(false));
+        transferMenu.DropDownItems.Add("記憶したパスワードを解除", null, (_, _) => manageExportPassword?.Invoke(true));
         toolbar.Items.Add(transferMenu);
+        toolbar.Items.Add(new ToolStripButton("完全に閉じる", null, async (_, _) => { if (exit is not null) await exit(); })
+        { AutoSize = true, DisplayStyle = ToolStripItemDisplayStyle.Text, Alignment = ToolStripItemAlignment.Right, Overflow = ToolStripItemOverflow.Never });
+        toolbar.Items.Add(new ToolStripButton("再起動", null, async (_, _) => { if (restart is not null) await restart(); })
+        { AutoSize = true, DisplayStyle = ToolStripItemDisplayStyle.Text, Alignment = ToolStripItemAlignment.Right, Overflow = ToolStripItemOverflow.Never });
 
         _grid.Dock = DockStyle.Fill;
         _grid.ReadOnly = true;
@@ -130,19 +141,29 @@ internal sealed class MainForm : Form
     public void Reload()
     {
         if (IsDisposed) return;
+        var selectedId = _grid.CurrentRow?.Tag as long?;
+        var sortedColumn = _grid.SortedColumn;
+        var sortOrder = _grid.SortOrder;
         _sites = _database.GetSites();
         _grid.Rows.Clear();
         foreach (var site in _sites)
         {
-            _grid.Rows.Add(site.Enabled ? "✓" : "", NotificationUrl.RedactText(site.Name), NotificationUrl.ForSite(site), site.EffectiveMode is null ? ModeText(site.MonitorMode) : ModeTextOrValue(site.EffectiveMode),
+            var index = _grid.Rows.Add(site.Enabled ? "✓" : "", DisplayText.Content(site.Name), NotificationUrl.ForSite(site), site.EffectiveMode is null ? ModeText(site.MonitorMode) : ModeTextOrValue(site.EffectiveMode),
                 ScheduleText(site), DateText(site.NextDue), DateText(site.LastChecked), DateText(site.LastChanged),
                 site.LastError is null ? (site.LastChecked is null ? "未確認" : "正常") : $"エラー（{site.ConsecutiveErrors}回）");
+            _grid.Rows[index].Tag = site.Id;
+            _grid.Rows[index].Cells["State"].ToolTipText = site.LastError is null ? "" : DisplayText.Diagnostic(site.LastError);
         }
+        if (sortedColumn is not null && sortOrder != SortOrder.None)
+            _grid.Sort(sortedColumn, sortOrder == SortOrder.Descending ? System.ComponentModel.ListSortDirection.Descending : System.ComponentModel.ListSortDirection.Ascending);
+        if (selectedId is not null)
+            foreach (DataGridViewRow row in _grid.Rows)
+                if (row.Tag is long id && id == selectedId) { _grid.ClearSelection(); _grid.CurrentCell = row.Cells[0]; row.Selected = true; break; }
         RefreshStatus();
     }
 
     public void RefreshStatus() => _status.Text = $"{(_scheduler.Paused ? "一時停止中" : "監視中")}  |  有効 {_sites.Count(s => s.Enabled)}件  |  処理中 {_scheduler.RunningCount}件";
-    private Site? Selected() => _grid.CurrentRow?.Index is int index && index >= 0 && index < _sites.Count ? _sites[index] : null;
+    private Site? Selected() => _grid.CurrentRow?.Tag is long id ? _database.GetSite(id) : null;
 
     private void EditSite(Site? site)
     {
@@ -161,7 +182,7 @@ internal sealed class MainForm : Form
     {
         var site = Selected();
         if (site is null) return;
-        if (MessageBox.Show($"「{site.Name}」を削除しますか？\n更新履歴も削除されます。", "削除確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (!(DeleteConfirmation?.Invoke(site) ?? (MessageBox.Show($"「{DisplayText.Content(site.Name)}」を削除しますか？\n更新履歴も削除されます。", "削除確認", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes))) return;
         _database.DeleteSite(site.Id);
         _scheduler.ScheduleChanged();
         Reload();
@@ -173,9 +194,11 @@ internal sealed class MainForm : Form
         if (site is not null) await _scheduler.CheckNowAsync([site]);
     }
 
-    private void ShowHistory()
+    private void ShowSelectedHistory() { var site = Selected(); if (site is not null) ShowHistory(site.Id); }
+
+    private void ShowHistory(long? siteId)
     {
-        using var form = new HistoryForm(_database, Selected()?.Id, _openUrl);
+        using var form = new HistoryForm(_database, siteId, _openUrl);
         form.ShowDialog(this);
     }
 
@@ -194,7 +217,7 @@ internal sealed class MainForm : Form
             _scheduler.ScheduleChanged();
             Reload();
         });
-        menu.Items.Add("更新履歴", null, (_, _) => ShowHistory());
+        menu.Items.Add("更新履歴", null, (_, _) => ShowSelectedHistory());
         menu.Items.Add("削除", null, (_, _) => DeleteSelected());
         _grid.ContextMenuStrip = menu;
         UiFontManager.Register(menu, _getSettings().UiFontSize);
@@ -219,7 +242,7 @@ internal sealed class MainForm : Form
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
     {
-        if (_configurationBusy()) { e.Cancel = true; return; }
+        if (!_allowExit && _configurationBusy()) { e.Cancel = true; return; }
         if (_allowExit || e.CloseReason == CloseReason.UserClosing) SaveLayout();
     }
 
@@ -236,10 +259,13 @@ internal sealed class MainForm : Form
         Reload();
     }
 
-    private void SaveLayout()
+    internal void SaveForShutdown() { SaveLayout(true); _shutdownLayoutSaved = true; }
+
+    private void SaveLayout(bool forShutdown = false)
     {
-        if (_configurationBusy()) return;
-        if (WindowState == FormWindowState.Minimized) return;
+        if (_allowExit && _shutdownLayoutSaved) return;
+        if (!forShutdown && !_allowExit && _configurationBusy()) return;
+        if (!forShutdown && WindowState == FormWindowState.Minimized) return;
         var settings = _getSettings();
         var bounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
         settings.WindowX = bounds.X;
@@ -264,7 +290,7 @@ internal sealed class MainForm : Form
         MonitorMode.Feed => "RSS / Atom",
         MonitorMode.FullPage => "ページ全体",
         MonitorMode.Text => "テキスト",
-        MonitorMode.CssSelector => "CSS Selector",
+        MonitorMode.CssSelector => "CSSセレクター",
         MonitorMode.XPath => "XPath",
         MonitorMode.Regex => "正規表現",
         _ => "不明"

@@ -7,9 +7,23 @@ internal static class Program
     [STAThread]
     private static void Main(string[] args)
     {
+        // No paths, Mutex or UI are initialized while the previous process is alive.
+        if (args.Any(argument => argument.StartsWith(RestartLauncher.ArgumentPrefix, StringComparison.Ordinal)))
+        {
+            var result = RestartLauncher.CompleteHelper(args);
+            if (!RestartLauncher.IsSuccess(result))
+            {
+                var probe = args.FirstOrDefault(argument => argument.StartsWith(RestartProbeApplication.ArgumentPrefix, StringComparison.Ordinal));
+                if (probe is not null) RestartProbeApplication.ReportHelperFailure(probe, result);
+                else MessageBox.Show("旧プロセスの安全な終了を確認できないため再起動を中止しました。原因区分: " + result + "。通常起動は自動実行しません。", "再起動", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+        }
         ApplicationConfiguration.Initialize();
         try
         {
+            var restartProbe = args.FirstOrDefault(argument => argument.StartsWith(RestartProbeApplication.ArgumentPrefix, StringComparison.Ordinal));
+            if (restartProbe is not null) { RestartProbeApplication.Run(restartProbe); return; }
             if (args.Contains("--ui-probe", StringComparer.OrdinalIgnoreCase))
             {
                 UiProbeApplication.Run(args.Contains("--ui-probe-auto-close", StringComparer.OrdinalIgnoreCase) ? TimeSpan.FromSeconds(12) : null, args.Contains("--ui-probe-100-sites", StringComparer.OrdinalIgnoreCase) ? 100 : 1, ReadUiProbeFontSize(args), ReadUiProbeWidth(args));
@@ -37,7 +51,7 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show("WebSite Monitorを起動できません。\n\n" + NotificationUrl.RedactText(ex.Message), "WebSite Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show("WebSite Monitorを起動できません。\n\n" + DisplayText.Exception(ex), "WebSite Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
         }
     }
 private static int? ReadUiProbeWidth(IEnumerable<string> args)

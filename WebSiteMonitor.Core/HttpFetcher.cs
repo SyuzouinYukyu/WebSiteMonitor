@@ -1,4 +1,5 @@
 using System.Net;
+using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,6 +11,8 @@ public interface IHttpFetcher
     Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, CancellationToken cancellationToken);
     Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, bool useBrowserCompatibleUserAgent, CancellationToken cancellationToken)
         => FetchAsync(uri, etag, lastModified, cancellationToken);
+    Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, bool useBrowserCompatibleUserAgent, TimeSpan remainingTime, CancellationToken cancellationToken)
+        => FetchAsync(uri, etag, lastModified, useBrowserCompatibleUserAgent, cancellationToken);
 }
 
 public sealed class SharedHttpFetcher : IHttpFetcher, IDisposable
@@ -21,12 +24,18 @@ public sealed class SharedHttpFetcher : IHttpFetcher, IDisposable
     private readonly HttpClient _client;
     private readonly bool _ownsClient;
     private readonly int _maxBytes;
+    private readonly TimeSpan _attemptTimeout;
+    private readonly TimeSpan _operationTimeout;
 
     static SharedHttpFetcher() => Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
-    public SharedHttpFetcher(HttpClient? client = null, int maxBytes = 16 * 1024 * 1024)
+    public SharedHttpFetcher(HttpClient? client = null, int maxBytes = 16 * 1024 * 1024,
+        TimeSpan? attemptTimeout = null, TimeSpan? operationTimeout = null)
     {
         _maxBytes = maxBytes;
+        _attemptTimeout = attemptTimeout ?? TimeSpan.FromSeconds(30);
+        _operationTimeout = operationTimeout ?? TimeSpan.FromSeconds(100);
+        if (_attemptTimeout <= TimeSpan.Zero || _operationTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(attemptTimeout));
         if (client is not null) { _client = client; return; }
         var handler = new HttpClientHandler
         {
@@ -35,54 +44,91 @@ public sealed class SharedHttpFetcher : IHttpFetcher, IDisposable
             MaxAutomaticRedirections = 8,
             UseProxy = true
         };
-        _client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        _client.DefaultRequestHeaders.UserAgent.ParseAdd("WebSiteMonitor/1.1.0 (+Windows 11; portable monitor)");
+        _client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
+        _client.DefaultRequestHeaders.UserAgent.ParseAdd("WebSiteMonitor/1.1.4 (+Windows 11; portable monitor)");
         _ownsClient = true;
     }
 
     public Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, CancellationToken cancellationToken)
         => FetchAsync(uri, etag, lastModified, false, cancellationToken);
 
-    public async Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, bool useBrowserCompatibleUserAgent, CancellationToken cancellationToken)
+    public Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, bool useBrowserCompatibleUserAgent, CancellationToken cancellationToken)
+        => FetchAsync(uri, etag, lastModified, useBrowserCompatibleUserAgent, _operationTimeout, cancellationToken);
+
+    public async Task<HttpFetchResult> FetchAsync(Uri uri, string? etag, string? lastModified, bool useBrowserCompatibleUserAgent, TimeSpan remainingTime, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        var operationTimeout = remainingTime < _operationTimeout ? remainingTime : _operationTimeout;
+        if (operationTimeout <= TimeSpan.Zero) throw new TimeoutException("HTTP取得の残り時間がありません。");
+        using var operation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        operation.CancelAfter(operationTimeout);
+        var elapsed = Stopwatch.StartNew();
+        try
+        {
         for (var attempt = 0; ; attempt++)
         {
+            operation.Token.ThrowIfCancellationRequested();
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(operation.Token);
+            deadline.CancelAfter(_attemptTimeout);
+            var token = deadline.Token;
+            TimeSpan retryDelay;
             using var request = new HttpRequestMessage(HttpMethod.Get, uri);
             if (useBrowserCompatibleUserAgent) request.Headers.UserAgent.ParseAdd(BrowserCompatibleUserAgent);
             if (!string.IsNullOrWhiteSpace(etag) && EntityTagHeaderValue.TryParse(etag, out var tag)) request.Headers.IfNoneMatch.Add(tag);
             if (DateTimeOffset.TryParse(lastModified, out var modified)) request.Headers.IfModifiedSince = modified;
             try
             {
-                using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
                 if (response.StatusCode == HttpStatusCode.NotModified)
                     return new HttpFetchResult(304, null, null, null, etag, lastModified, response.RequestMessage?.RequestUri ?? uri, true);
                 if (RetryPolicy.IsTransient((int)response.StatusCode) && attempt < 2)
                 {
                     var retryAfter = response.Headers.RetryAfter;
-                    await Task.Delay(RetryPolicy.DelayForAttempt(attempt, retryAfter?.Delta, retryAfter?.Date, DateTimeOffset.UtcNow), cancellationToken).ConfigureAwait(false);
+                    var now = DateTimeOffset.UtcNow;
+                    retryDelay = RetryPolicy.DelayForAttempt(attempt, retryAfter?.Delta, retryAfter?.Date, now);
+                    // Do not shorten a server's rate limit to fit our deadline (or the policy clamp).
+                    var requestedDelay = retryAfter?.Delta ?? (retryAfter?.Date - now);
+                    if (requestedDelay > retryDelay) retryDelay = requestedDelay.Value;
+                    response.Dispose();
+                    await DelayAsync(retryDelay).ConfigureAwait(false);
                     continue;
                 }
                 response.EnsureSuccessStatusCode();
                 var length = response.Content.Headers.ContentLength;
                 if (length > _maxBytes) throw new InvalidDataException($"レスポンスが上限 {_maxBytes / 1024 / 1024}MB を超えています。");
-                await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+                await using var stream = await response.Content.ReadAsStreamAsync(token).ConfigureAwait(false);
                 using var memory = new MemoryStream(length is > 0 and <= int.MaxValue ? (int)length.Value : 0);
                 var buffer = new byte[81920];
                 while (true)
                 {
-                    var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+                    var read = await stream.ReadAsync(buffer, token).ConfigureAwait(false);
                     if (read == 0) break;
                     if (memory.Length + read > _maxBytes) throw new InvalidDataException($"レスポンスが上限 {_maxBytes / 1024 / 1024}MB を超えています。");
-                    await memory.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    await memory.WriteAsync(buffer.AsMemory(0, read), token).ConfigureAwait(false);
                 }
+                token.ThrowIfCancellationRequested();
                 return new HttpFetchResult((int)response.StatusCode, memory.ToArray(), response.Content.Headers.ContentType?.MediaType,
                     response.Content.Headers.ContentType?.CharSet, response.Headers.ETag?.ToString(),
                     response.Content.Headers.LastModified?.ToString("R"), response.RequestMessage?.RequestUri ?? uri);
             }
-            catch (Exception ex) when (attempt < 2 && (ex is HttpRequestException || ex is TaskCanceledException) && !cancellationToken.IsCancellationRequested)
+            catch (Exception ex) when (attempt < 2 && !operation.IsCancellationRequested &&
+                (ex is OperationCanceledException || ex is HttpRequestException { StatusCode: null }))
             {
-                await Task.Delay(RetryPolicy.DelayForAttempt(attempt), cancellationToken).ConfigureAwait(false);
+                await DelayAsync(RetryPolicy.DelayForAttempt(attempt)).ConfigureAwait(false);
             }
+            catch (OperationCanceledException) when (!operation.IsCancellationRequested)
+            { throw new TimeoutException("HTTP試行が制限時間を超えました。"); }
+        }
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        { throw new TimeoutException("HTTP取得が制限時間を超えました。"); }
+
+        async Task DelayAsync(TimeSpan delay)
+        {
+            operation.Token.ThrowIfCancellationRequested();
+            if (delay >= operationTimeout - elapsed.Elapsed)
+                throw new TimeoutException("再試行待機が取得期限を超えるため終了しました。");
+            await Task.Delay(delay, operation.Token).ConfigureAwait(false);
         }
     }
 

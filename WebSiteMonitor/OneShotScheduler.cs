@@ -15,6 +15,7 @@ internal sealed class OneShotScheduler : IDisposable
     private readonly object _shutdownSync = new();
     private readonly object _activitySync = new();
     private Task? _stopTask;
+    private Task _drainTask = Task.CompletedTask;
     private long _taskSequence;
     private int _running;
     private int _stopping;
@@ -171,7 +172,8 @@ internal sealed class OneShotScheduler : IDisposable
 
     private void Arm()
     {
-        if (Paused || Volatile.Read(ref _stopping) != 0 || Volatile.Read(ref _configurationSuspended) != 0) { _timer.Change(Timeout.Infinite, Timeout.Infinite); return; }
+        if (Volatile.Read(ref _stopping) != 0) return;
+        if (Paused || Volatile.Read(ref _configurationSuspended) != 0) { _timer.Change(Timeout.Infinite, Timeout.Infinite); return; }
         try
         {
             var next = _database.GetSites().Where(s => s.Enabled && s.ScheduleMode != ScheduleMode.Manual).Select(s => s.NextDue ?? DateTimeOffset.Now).DefaultIfEmpty(DateTimeOffset.Now.AddHours(24)).Min();
@@ -193,6 +195,15 @@ internal sealed class OneShotScheduler : IDisposable
         }
     }
 
+    public async Task StopAndDrainAsync(TimeSpan? timeout = null)
+    {
+        var limit = timeout ?? TimeSpan.FromSeconds(20);
+        await StopAsync(limit).ConfigureAwait(false);
+        // StopAsync's bounded wait alone is not proof of a safe restart.
+        if (!_drainTask.IsCompleted) throw new TimeoutException("監視処理の終了を確認できませんでした。");
+        try { await _drainTask.ConfigureAwait(false); } catch (OperationCanceledException) { }
+    }
+
     private async Task StopCoreAsync(TimeSpan timeout)
     {
         Task[] tasks;
@@ -205,6 +216,7 @@ internal sealed class OneShotScheduler : IDisposable
             tasks = _activeTasks.Values.ToArray();
         }
         var all = tasks.Length == 0 ? Task.CompletedTask : Task.WhenAll(tasks);
+        _drainTask = all;
         var completed = await Task.WhenAny(all, Task.Delay(timeout)).ConfigureAwait(false);
         if (completed == all)
         {
