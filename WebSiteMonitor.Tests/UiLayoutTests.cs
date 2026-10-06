@@ -46,7 +46,7 @@ public sealed class UiLayoutTests : IDisposable
             form.CreateControl();
             ShowForLayout(form);
             Assert.True(form.MinimumSize.Width >= 860);
-            Assert.Equal(3, FindAll<Button>(form).Count(button => button.Text == "貼り付け"));
+            Assert.Equal(3, FindAll<Button>(form).Count(button => button.Text == "貼り付け" && button.Visible));
             Assert.Contains(FindAll<Button>(form), button => button.Text == "監視テスト / 抽出プレビュー" && button.Visible);
             Assert.Contains(FindAll<CheckBox>(form), box => box.Text == "独自ポップアップ" && box.Visible);
             AssertNoVisibleControlHasEmptyBounds(form);

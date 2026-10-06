@@ -118,7 +118,7 @@ public sealed class V113Tests : IDisposable
                 var test = All<Button>(body).Single(button => button.Text == "監視テスト / 抽出プレビュー");
                 viewport.ScrollControlIntoView(test); Application.DoEvents();
                 Assert.True(viewport.ClientRectangle.Contains(RelativeBounds(viewport, test)));
-                Assert.Equal(3, All<Button>(body).Count(button => button.Text == "貼り付け"));
+                Assert.Equal(3, All<Button>(body).Count(button => button.Text == "貼り付け" && button.Visible));
                 Assert.All(All<TextBox>(body).Where(box => !box.Multiline), box => Assert.True(box.Width >= 60, $"input width={box.Width}"));
             }
             form.Close();

@@ -149,7 +149,7 @@ public sealed class V112Tests : IDisposable
             using var history = new global::WebSiteMonitor.HistoryForm(db, null, _ => { }); using var preferences = new global::WebSiteMonitor.SettingsForm(settings);
             main.Show(); editor.Show(); history.Show(); preferences.Show(); Application.DoEvents();
             Assert.True(global::WebSiteMonitor.TrayApplicationContext.IsShutdownBlocked(false)); Assert.True(global::WebSiteMonitor.TrayApplicationContext.IsShutdownBlocked(true));
-            Assert.Equal("WebSite Monitor v1.1.4", main.Text);
+            Assert.Equal("WebSite Monitor v1.1.5", main.Text);
             var strip = main.Controls.OfType<ToolStrip>().Single(s => s is not StatusStrip); var restart = Item(strip, "再起動"); var close = Item(strip, "完全に閉じる");
             Assert.True(restart.Bounds.Right <= close.Bounds.Left); Assert.InRange(close.Bounds.Left - restart.Bounds.Right, 0, 8);
             foreach (var button in new[] { close, restart }) { Assert.Equal(ToolStripItemOverflow.Never, button.Overflow); Assert.True(button.Available); Assert.True(strip.ClientRectangle.Contains(button.Bounds)); }

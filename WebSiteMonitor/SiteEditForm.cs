@@ -39,6 +39,8 @@ internal sealed class SiteEditForm : Form
     private readonly TextBox _preview = new() { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill };
     private readonly TableLayoutPanel _details = new() { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Padding = new Padding(0, 4, 0, 4) };
     private readonly Dictionary<Control, Label> _detailLabels = [];
+    private readonly Dictionary<Control, Control> _detailFields = [];
+    internal Func<string?> ReadClipboardText = () => Clipboard.ContainsText() ? Clipboard.GetText() : null;
     private CancellationTokenSource? _testCancellation;
     private Task _activeTest = Task.CompletedTask;
     private static readonly HashSet<SiteEditForm> RunningTests = [];
@@ -125,23 +127,25 @@ internal sealed class SiteEditForm : Form
     {
         _details.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _details.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        AddDetail(_feedLabel, _feed);
-        AddDetail(new Label { Text = "CSS Selector", AutoSize = true, Anchor = AnchorStyles.Left }, _selector);
-        AddDetail(new Label { Text = "XPath", AutoSize = true, Anchor = AnchorStyles.Left }, _xpath);
-        AddDetail(new Label { Text = "正規表現", AutoSize = true, Anchor = AnchorStyles.Left }, _regex);
+        AddDetail(_feedLabel, _feed, true);
+        AddDetail(new Label { Text = "CSS Selector", AutoSize = true, Anchor = AnchorStyles.Left }, _selector, false);
+        AddDetail(new Label { Text = "XPath", AutoSize = true, Anchor = AnchorStyles.Left }, _xpath, false);
+        AddDetail(new Label { Text = "正規表現", AutoSize = true, Anchor = AnchorStyles.Left }, _regex, false);
         _details.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _details.Controls.Add(_autoHint, 0, _details.RowCount);
         _details.SetColumnSpan(_autoHint, 2);
         _details.RowCount++;
     }
 
-    private void AddDetail(Label label, Control control)
+    private void AddDetail(Label label, TextBox control, bool isUrl)
     {
         _details.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         _details.Controls.Add(label, 0, _details.RowCount);
-        control.Dock = DockStyle.Fill;
-        _details.Controls.Add(control, 1, _details.RowCount);
+        var field = FieldWithPaste(control, isUrl);
+        field.Dock = DockStyle.Fill;
+        _details.Controls.Add(field, 1, _details.RowCount);
         _detailLabels[control] = label;
+        _detailFields[control] = field;
         _details.RowCount++;
     }
 
@@ -269,7 +273,7 @@ internal sealed class SiteEditForm : Form
 
     private void SetDetailVisible(Control control, bool visible)
     {
-        control.Visible = visible;
+        _detailFields[control].Visible = visible;
         _detailLabels[control].Visible = visible;
     }
 
@@ -277,8 +281,9 @@ internal sealed class SiteEditForm : Form
     {
         try
         {
-            if (!Clipboard.ContainsText()) return;
-            target.Text = isUrl ? ClipboardText.NormalizeUrl(Clipboard.GetText()) : ClipboardText.NormalizeSiteName(Clipboard.GetText());
+            var text = ReadClipboardText();
+            if (text is null) return;
+            target.Text = isUrl ? ClipboardText.NormalizeUrl(text) : ClipboardText.NormalizeSiteName(text);
             target.Focus();
             target.SelectionStart = target.TextLength;
         }
