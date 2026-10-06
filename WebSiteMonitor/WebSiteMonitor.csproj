@@ -11,9 +11,9 @@
     <RootNamespace>WebSiteMonitor</RootNamespace>
     <Product>WebSite Monitor</Product>
     <AssemblyTitle>WebSite Monitor</AssemblyTitle>
-    <Version>1.1.4</Version>
-    <FileVersion>1.1.4.0</FileVersion>
-    <AssemblyVersion>1.1.4.0</AssemblyVersion>
+    <Version>1.1.5</Version>
+    <FileVersion>1.1.5.0</FileVersion>
+    <AssemblyVersion>1.1.5.0</AssemblyVersion>
     <ApplicationIcon>..\Resources\WebSiteMonitor.ico</ApplicationIcon>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <PublishSingleFile>true</PublishSingleFile>

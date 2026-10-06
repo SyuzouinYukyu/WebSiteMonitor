@@ -1,4 +1,10 @@
-# WebSite Monitor v1.1.4
+# WebSite Monitor v1.1.5
+
+## v1.1.5 の貼り付け操作
+
+サイトの追加・編集画面の「監視方式の詳細」に、RSS / Atom URL、CSSセレクター、XPath、正規表現の入力欄と連動する「貼り付け」ボタンを追加しました。RSS / Atom URLは既存のURL正規化を使用します。式は構文を維持し、末尾のCR/LFだけを除去します。自動・ページ全体・テキストでは詳細入力欄とボタンを表示しません。監視・通知・DBスキーマ7・設定形式1には変更ありません。
+
+実機GUIで4方式の表示切替・貼り付け・監視テスト・保存後の再編集を確認済みです。自動テストは337件成功、失敗0、スキップ0です。
 
 ## v1.1.4 の再起動修正
 
@@ -19,7 +25,7 @@ SQLiteスキーマ7、設定形式1、暗号・DPAPI・FIFO・v1.1.3の5機能�
 
 ## v1.1.2で追加した機能（継続）
 
-- メイン画面のタイトルとトレイ表示は実際の製品バージョンを示します。配布ファイル名は `WebSiteMonitor_v1.1.4.exe` です。
+- メイン画面のタイトルとトレイ表示は実際の製品バージョンを示します。配布ファイル名は `WebSiteMonitor_v1.1.5.exe` です。
 - ツールバーの「更新履歴」は必ず「すべて」から開きます。右クリックの「更新履歴」は選択サイトから開きます。上部の「表示対象」で即座に切り替えます。各対象の最新1,000件をSQLで取得し、無効サイトも選択できます。同名サイトは安全なURLとIDで区別します。履歴表示は通知の確認やデータの書き換えを行いません。
 - 一覧を並べ替えた後の編集・削除・確認・ブラウザー表示などは固定サイトIDで解決します。削除済みサイトへの操作は中止します。再読み込みは並べ替え・選択ID・列幅を維持します。
 - フォント操作は `Ctrl + +` / `Ctrl + -`（テンキーも可、プラスはShift併用可）です。10～18pt、1pt刻みで保存し、全画面に適用します。通常ホイールとCtrl＋ホイールはフォントを変更しません。
@@ -134,7 +140,7 @@ dotnet build .\WebSiteMonitor.sln -c Release
 dotnet test .\WebSiteMonitor.sln -c Release --no-build
 dotnet publish .\WebSiteMonitor\WebSiteMonitor.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugSymbols=false -o .\publish
 New-Item -ItemType Directory -Path ..\release -Force
-Copy-Item .\publish\WebSiteMonitor.exe ..\release\WebSiteMonitor_v1.1.4.exe
+Copy-Item .\publish\WebSiteMonitor.exe ..\release\WebSiteMonitor_v1.1.5.exe
 ```
 
 ## ポータブルデータ
@@ -155,7 +161,7 @@ JavaScriptレンダリングやWebView2は使用しません。
 
 ## 公開用ファイル
 
-正式配布EXEはGitHub Releasesの `WebSiteMonitor_v1.1.4.exe` です。ソースにはプロジェクト・テスト・Resources・本書・CHANGELOG・LICENSE・THIRD_PARTY_NOTICESを残します。`.gitignore` は生成物、ポータブルdata、DB、ログ、秘密鍵等を除外します。公開用のソースに旧版フォルダーや実データをコピーしないでください。
+正式配布EXEはGitHub Releasesの `WebSiteMonitor_v1.1.5.exe` です。ソースにはプロジェクト・テスト・Resources・本書・CHANGELOG・LICENSE・THIRD_PARTY_NOTICESを残します。`.gitignore` は生成物、ポータブルdata、DB、ログ、秘密鍵等を除外します。公開用のソースに旧版フォルダーや実データをコピーしないでください。
 
 本体コードは所有者の指定により権利留保です（`LICENSE`）。第三者コンポーネントの許諾は独立して適用されます。
 

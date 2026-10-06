@@ -45,7 +45,7 @@ public sealed class SharedHttpFetcher : IHttpFetcher, IDisposable
             UseProxy = true
         };
         _client = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
-        _client.DefaultRequestHeaders.UserAgent.ParseAdd("WebSiteMonitor/1.1.4 (+Windows 11; portable monitor)");
+        _client.DefaultRequestHeaders.UserAgent.ParseAdd("WebSiteMonitor/1.1.5 (+Windows 11; portable monitor)");
         _ownsClient = true;
     }
 
