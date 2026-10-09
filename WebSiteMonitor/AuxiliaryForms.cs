@@ -123,6 +123,7 @@ internal sealed class SettingsForm : Form
     private readonly CheckBox _start = new() { Text = "Windows起動時に自動起動", AutoSize = true };
     private readonly CheckBox _notifications = new() { Text = "更新通知を有効にする", AutoSize = true };
     private readonly CheckBox _popup = new() { Text = "新規サイトの既定値として独自ポップアップを使用", AutoSize = true };
+    private readonly TextBox _errorThreshold = new() { Name = "ConsecutiveErrorAlertThreshold", MaxLength = 0 };
     private readonly NumericUpDown _history = new() { Minimum = 1, Maximum = 3650, ThousandsSeparator = true };
     private readonly NumericUpDown _logs = new() { Minimum = 1, Maximum = 365, ThousandsSeparator = true };
     private readonly ComboBox _pcmRate = new() { DropDownStyle = ComboBoxStyle.DropDownList };
@@ -146,6 +147,10 @@ internal sealed class SettingsForm : Form
         _start.Checked = value.StartWithWindows;
         _notifications.Checked = value.NotificationsEnabled;
         _popup.Checked = value.DefaultPopup;
+        _errorThreshold.Text = value.ConsecutiveErrorAlertThreshold.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        _errorThreshold.AutoSize = false;
+        _errorThreshold.FontChanged += (_, _) => _errorThreshold.MinimumSize = new Size(0, _errorThreshold.GetPreferredSize(Size.Empty).Height);
+        _errorThreshold.MinimumSize = new Size(0, _errorThreshold.GetPreferredSize(Size.Empty).Height);
         _history.Value = Math.Clamp(value.HistoryRetentionDays, 1, 3650);
         _logs.Value = Math.Clamp(value.LogRetentionDays, 1, 365);
         SelectOrAdd(_pcmRate, value.PcmSampleRate);
@@ -159,6 +164,8 @@ internal sealed class SettingsForm : Form
         AddRow(root, "", _start);
         AddRow(root, "通知", _notifications);
         AddRow(root, "ポップアップ", _popup);
+        AddRow(root, "連続エラー警告回数", _errorThreshold);
+        AddRow(root, "", new Label { Text = "0で無効。1～9999回で指定します。", AutoSize = true, MaximumSize = new Size(620, 0) });
         AddRow(root, "履歴保存日数", _history);
         AddRow(root, "ログ保存日数", _logs);
         var pcm = new GroupBox { Text = "PCM（.pcm / .raw）再生設定", Dock = DockStyle.Top, AutoSize = true };
@@ -230,6 +237,25 @@ internal sealed class SettingsForm : Form
 
     private void Save(object? sender, EventArgs e)
     {
+        if (!TrySave(message => MessageBox.Show(this, message, "入力内容の確認", MessageBoxButtons.OK, MessageBoxIcon.Warning))) return;
+        DialogResult = DialogResult.OK;
+        Close();
+    }
+
+    internal bool TrySave(Action<string> showWarning)
+    {
+        var text = _errorThreshold.Text;
+        string? error = text.Any(c => c is < '0' or > '9') ? "半角数字のみ入力可能です"
+            : !int.TryParse(text, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out var parsed) || parsed > 9999
+                ? "0～9999の範囲で入力してください。" : null;
+        if (error is not null)
+        {
+            showWarning(error);
+            _errorThreshold.Focus();
+            _errorThreshold.SelectAll();
+            return false;
+        }
+        Value.ConsecutiveErrorAlertThreshold = int.Parse(text, System.Globalization.CultureInfo.InvariantCulture);
         Value.WindowsIntegrationEnabled = _integration.Checked;
         Value.StartWithWindows = _integration.Checked && _start.Checked;
         Value.NotificationsEnabled = _notifications.Checked;
@@ -239,13 +265,13 @@ internal sealed class SettingsForm : Form
         Value.PcmSampleRate = (int)(_pcmRate.SelectedItem ?? 44100);
         Value.PcmBits = (int)(_pcmBits.SelectedItem ?? 16);
         Value.PcmChannels = (_pcmChannels.SelectedItem as ChannelChoice)?.Value ?? 2;
-        DialogResult = DialogResult.OK;
-        Close();
+        return true;
     }
 }
 
 internal sealed class AboutForm : Form
 {
+    internal const string GitHubUrl = "https://github.com/SyuzouinYukyu/WebSiteMonitor";
     public AboutForm()
     {
         Text = "WebSite Monitor について";
@@ -258,7 +284,30 @@ internal sealed class AboutForm : Form
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.Controls.Add(new Label { Text = "WebSite Monitor\nv" + ProductInfo.Version, Font = new Font("Yu Gothic UI", 13F, FontStyle.Bold), AutoSize = true }, 0, 0);
+        var heading = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, RowCount = 2 };
+        heading.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        heading.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        heading.Controls.Add(new Label { Text = "WebSite Monitor\nv" + ProductInfo.Version, Font = new Font("Yu Gothic UI", 13F, FontStyle.Bold), AutoSize = true }, 0, 0);
+        var github = new LinkLabel { Name = "GitHubLink", Text = "GitHub: " + GitHubUrl, AutoSize = true, UseMnemonic = false };
+        github.Links.Add("GitHub: ".Length, GitHubUrl.Length, GitHubUrl);
+        github.LinkClicked += (_, _) =>
+        {
+            try
+            {
+                var start = BrowserLaunch.CreateStartInfo(GitHubUrl);
+                if (start is null) throw new InvalidOperationException();
+                System.Diagnostics.Process.Start(start);
+            }
+            catch { MessageBox.Show(this, "ブラウザーを開けませんでした。", "GitHub", MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+        };
+        heading.Controls.Add(github, 0, 1);
+        heading.Layout += (_, _) =>
+        {
+            var width = Math.Max(1, heading.ClientSize.Width - heading.Padding.Horizontal - github.Margin.Horizontal);
+            if (github.MaximumSize.Width != width) github.MaximumSize = new Size(width, 0);
+        };
+        layout.Controls.Add(heading, 0, 0);
         var license = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill, Text = LicenseText.Load() };
         layout.Controls.Add(license, 0, 1);
         var close = new Button { Text = "閉じる", AutoSize = true, DialogResult = DialogResult.Cancel, Anchor = AnchorStyles.Right };

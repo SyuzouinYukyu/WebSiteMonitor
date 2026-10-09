@@ -8,9 +8,9 @@
 
 ## 📦 FFmpeg について
 
-v1.1.5のEXEと公開ソースにはFFmpegの実行ファイル・DLL・ZIPを同梱しません。圧縮音声などの通知音を利用する場合は、利用者が別途FFmpegを導入し、`ffmpeg.exe` のある絶対パスのディレクトリをPATHへ登録してください。自動取得・インストールは行いません。FFmpegがなくても監視や音声以外の通知は継続します。
+v1.1.6のEXEと公開ソースにはFFmpegの実行ファイル・DLL・ZIPを同梱しません。圧縮音声などの通知音を利用する場合は、利用者が別途FFmpegを導入し、`ffmpeg.exe` のある絶対パスのディレクトリをPATHへ登録してください。自動取得・インストールは行いません。FFmpegがなくても監視や音声以外の通知は継続します。
 
-以下はv1.0.4以前の埋め込み方式に関する履歴であり、v1.1.5のビルド要件ではありません。GitHubリポジトリには次の旧版用ZIPを収録していません。
+以下はv1.0.4以前の埋め込み方式に関する履歴であり、v1.1.6のビルド要件ではありません。GitHubリポジトリには次の旧版用ZIPを収録していません。
 
 ```text
 WebSiteMonitor/Resources/ffmpeg-win64-lgpl-shared.zip
@@ -25,7 +25,7 @@ SHA-256:        40633DAB97D235F7DE4FF5B8E34E80D778D4E89F97EFB142B081127F3D7C8633
 Cache ID:       btbn-lgpl-shared-20260915
 ```
 
-v1.1.5のビルドに上記ZIPの配置は不要です。
+v1.1.6のビルドに上記ZIPの配置は不要です。
 
 > [!NOTE]
 > 現行版の外部FFmpeg方針と第三者ライセンスは `README.md` と `THIRD_PARTY_NOTICES.md` を確認してください。
@@ -47,7 +47,7 @@ dotnet build .\WebSiteMonitor.sln -c Release
 dotnet test .\WebSiteMonitor.sln -c Release --no-build
 ```
 
-v1.1.5の最終ソースでは337件のテスト成功を確認しています。詳細と実機GUI確認範囲は `RELEASE_VERIFICATION.md` を参照してください。
+v1.1.6は2026-10-09の独立検査で345件成功、失敗0、スキップ0を確認しています。今回の再確認結果と未検証範囲は `RELEASE_VERIFICATION.md` を参照してください。
 
 ## 📤 single-file Release
 
@@ -62,12 +62,12 @@ dotnet publish .\WebSiteMonitor\WebSiteMonitor.csproj `
   -o .\publish
 ```
 
-## 🔎 正規 v1.1.5 の確認値
+## 🔎 正規 v1.1.6 の確認値
 
 ```text
-WebSiteMonitor_v1.1.5.exe
-SHA-256: BDD97A686A98477D12DA9BE92F1701EA4C9CA9308F1AAE6A10A6E099573DDDA4
-Size:     145,733,756 bytes
+WebSiteMonitor_v1.1.6.exe
+SHA-256: 49EF123273673D8787CBB79614642812C08E1080A71E100EF916F5F0145D36FB
+Size:     145,735,292 bytes
 ```
 
 ## 🔐 公開時の注意

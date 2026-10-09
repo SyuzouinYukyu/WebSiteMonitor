@@ -398,10 +398,13 @@ public sealed class Database
     }
 
     public bool ApplyError(long siteId, long expectedRevision, string error, DateTimeOffset now)
+        => ApplyErrorWithCommittedCount(siteId, expectedRevision, error, now).HasValue;
+
+    public int? ApplyErrorWithCommittedCount(long siteId, long expectedRevision, string error, DateTimeOffset now)
     {
         using var c = Open(); using var tx = c.BeginTransaction();
         var site = GetSiteForUpdate(c, tx, siteId) ?? throw new InvalidOperationException("監視サイトが見つかりません。");
-        if (site.MonitorRevision != expectedRevision) { tx.Rollback(); return false; }
+        if (site.MonitorRevision != expectedRevision) { tx.Rollback(); return null; }
         using var cmd = c.CreateCommand();
         cmd.Transaction = tx;
         cmd.CommandText = "UPDATE Sites SET LastChecked=$at,NextDue=$next,ConsecutiveErrors=ConsecutiveErrors+1,LastError=$error WHERE Id=$id AND MonitorRevision=$revision";
@@ -410,9 +413,15 @@ public sealed class Database
         cmd.Parameters.AddWithValue("$error", ContentHasher.Preview(NotificationUrl.RedactText(error), 2000));
         cmd.Parameters.AddWithValue("$id", siteId);
         cmd.Parameters.AddWithValue("$revision", expectedRevision);
-        var applied = cmd.ExecuteNonQuery() == 1;
-        if (applied) tx.Commit(); else tx.Rollback();
-        return applied;
+        if (cmd.ExecuteNonQuery() != 1) { tx.Rollback(); return null; }
+        // Read our own increment under the same transaction's write lock.
+        using var count = c.CreateCommand();
+        count.Transaction = tx;
+        count.CommandText = "SELECT ConsecutiveErrors FROM Sites WHERE Id=$id";
+        count.Parameters.AddWithValue("$id", siteId);
+        var committedCount = checked((int)(long)count.ExecuteScalar()!);
+        tx.Commit();
+        return committedCount;
     }
 
     public void ApplyError(long siteId, string error, DateTimeOffset now)

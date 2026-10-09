@@ -1,4 +1,8 @@
-# WebSite Monitor v1.1.5
+# WebSite Monitor v1.1.6
+
+## v1.1.6 の変更
+
+連続エラー警告回数をアプリ全体設定へ追加しました（既定3、0で無効、1～9999）。DB保存済みの連続エラー数が閾値と一致した時だけサイトごとに1回警告し、正常取得後の新しい連続障害で再度警告します。更新通知OFFでも有効です。バージョン情報にGitHub URLを追加しました。DB schema 7 / wsmcfg形式1を維持し、旧設定の新項目省略時は3を使用します。
 
 ## v1.1.5 の貼り付け操作
 
@@ -25,7 +29,7 @@ SQLiteスキーマ7、設定形式1、暗号・DPAPI・FIFO・v1.1.3の5機能�
 
 ## v1.1.2で追加した機能（継続）
 
-- メイン画面のタイトルとトレイ表示は実際の製品バージョンを示します。配布ファイル名は `WebSiteMonitor_v1.1.5.exe` です。
+- メイン画面のタイトルとトレイ表示は実際の製品バージョンを示します。配布ファイル名は `WebSiteMonitor_v1.1.6.exe` です。
 - ツールバーの「更新履歴」は必ず「すべて」から開きます。右クリックの「更新履歴」は選択サイトから開きます。上部の「表示対象」で即座に切り替えます。各対象の最新1,000件をSQLで取得し、無効サイトも選択できます。同名サイトは安全なURLとIDで区別します。履歴表示は通知の確認やデータの書き換えを行いません。
 - 一覧を並べ替えた後の編集・削除・確認・ブラウザー表示などは固定サイトIDで解決します。削除済みサイトへの操作は中止します。再読み込みは並べ替え・選択ID・列幅を維持します。
 - フォント操作は `Ctrl + +` / `Ctrl + -`（テンキーも可、プラスはShift併用可）です。10～18pt、1pt刻みで保存し、全画面に適用します。通常ホイールとCtrl＋ホイールはフォントを変更しません。
@@ -140,7 +144,7 @@ dotnet build .\WebSiteMonitor.sln -c Release
 dotnet test .\WebSiteMonitor.sln -c Release --no-build
 dotnet publish .\WebSiteMonitor\WebSiteMonitor.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -p:DebugSymbols=false -o .\publish
 New-Item -ItemType Directory -Path ..\release -Force
-Copy-Item .\publish\WebSiteMonitor.exe ..\release\WebSiteMonitor_v1.1.5.exe
+Copy-Item .\publish\WebSiteMonitor.exe ..\release\WebSiteMonitor_v1.1.6.exe
 ```
 
 ## ポータブルデータ
@@ -161,7 +165,7 @@ JavaScriptレンダリングやWebView2は使用しません。
 
 ## 公開用ファイル
 
-正式配布EXEはGitHub Releasesの `WebSiteMonitor_v1.1.5.exe` です。ソースにはプロジェクト・テスト・Resources・本書・CHANGELOG・LICENSE・THIRD_PARTY_NOTICESを残します。`.gitignore` は生成物、ポータブルdata、DB、ログ、秘密鍵等を除外します。公開用のソースに旧版フォルダーや実データをコピーしないでください。
+正式配布EXEは `WebSiteMonitor_v1.1.6.exe` です。v1.1.6 の GitHub Release と EXE 添付は手動公開待ちです。ソースにはプロジェクト・テスト・Resources・本書・CHANGELOG・LICENSE・THIRD_PARTY_NOTICESを残します。`.gitignore` は生成物、ポータブルdata、DB、ログ、秘密鍵等を除外します。公開用のソースに旧版フォルダーや実データをコピーしないでください。
 
 本体コードは所有者の指定により権利留保です（`LICENSE`）。第三者コンポーネントの許諾は独立して適用されます。
 

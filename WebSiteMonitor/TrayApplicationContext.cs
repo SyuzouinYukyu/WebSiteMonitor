@@ -152,6 +152,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
         if (_configurationBusy) { _deferredChecks.Enqueue(result); return; }
         _mainForm?.Reload();
         _dialogs.TryShowNext();
+        var errorWarning = ConsecutiveErrorAlert.CreateMessage(result, _settings.ConsecutiveErrorAlertThreshold);
+        if (errorWarning is not null)
+            MessageBox.Show(_mainForm, errorWarning, "WebSite Monitor — 監視エラー", MessageBoxButtons.OK, MessageBoxIcon.Warning);
         if (!result.ShouldNotify || result.NewHash is null || !_settings.NotificationsEnabled) return;
         var notificationUrl = NotificationUrl.ForEvent(result);
         var handled = false;

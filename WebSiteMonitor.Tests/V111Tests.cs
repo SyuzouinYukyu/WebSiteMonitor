@@ -246,7 +246,7 @@ public sealed class V111Tests : IDisposable
             {
                 using var connection = await listener.AcceptTcpClientAsync(cancel.Token); await using var stream = connection.GetStream();
                 var buffer = new byte[4096]; var n = await stream.ReadAsync(buffer, cancel.Token);
-                Assert.Contains("WebSiteMonitor/1.1.5", Encoding.ASCII.GetString(buffer, 0, n));
+                Assert.Contains("WebSiteMonitor/1.1.6", Encoding.ASCII.GetString(buffer, 0, n));
                 var header = i == 0 ? $"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{port}/body\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                     : $"HTTP/1.1 200 OK\r\nContent-Encoding: gzip\r\nContent-Length: {compressed.Length}\r\nConnection: close\r\n\r\n";
                 await stream.WriteAsync(Encoding.ASCII.GetBytes(header), cancel.Token); if (i == 1) await stream.WriteAsync(compressed, cancel.Token);

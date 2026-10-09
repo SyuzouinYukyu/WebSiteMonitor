@@ -17,6 +17,7 @@ public sealed class SettingsStore
         {
             var settings = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_path), JsonOptions) ?? new();
             settings.UiFontSize = double.IsFinite(settings.UiFontSize) ? Math.Clamp(settings.UiFontSize, 10.0, 18.0) : 10.0;
+            settings.ConsecutiveErrorAlertThreshold = Math.Clamp(settings.ConsecutiveErrorAlertThreshold, 0, 9999);
             return settings;
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)

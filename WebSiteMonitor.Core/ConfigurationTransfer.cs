@@ -142,7 +142,10 @@ public static class ConfigurationTransfer
     {
         if (element.ValueKind != JsonValueKind.Object) throw new InvalidDataException();
         var names = element.EnumerateObject().Select(p => p.Name).ToArray();
-        var expected = type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name).ToArray();
+        // Format 1 predates this setting. Only this new field may be absent.
+        var expected = type.GetProperties(BindingFlags.Public | BindingFlags.Instance).Select(p => p.Name)
+            .Where(name => type != typeof(AppSettings) || name != nameof(AppSettings.ConsecutiveErrorAlertThreshold)
+                || names.Contains(name, StringComparer.Ordinal)).ToArray();
         if (names.Length != expected.Length || names.Distinct(StringComparer.Ordinal).Count() != names.Length
             || expected.Any(p => !names.Contains(p, StringComparer.Ordinal))) throw new InvalidDataException();
     }
@@ -161,7 +164,8 @@ public static class ConfigurationTransfer
                 SiteValidation.Validate(site);
             }
             var a = document.AppSettings;
-            if (!double.IsFinite(a.UiFontSize) || a.UiFontSize is < 10 or > 18
+            if (a.ConsecutiveErrorAlertThreshold is < 0 or > 9999
+                || !double.IsFinite(a.UiFontSize) || a.UiFontSize is < 10 or > 18
                 || a.WindowWidth is < 1 or > 32768 || a.WindowHeight is < 1 or > 32768
                 || a.ColumnWidths is null || a.ColumnWidths.Count > 100 || a.ColumnWidths.Any(p => p.Key.Length > 100 || p.Value is < 1 or > 32768)
                 || a.HistoryRetentionDays is < 1 or > 3650 || a.LogRetentionDays is < 1 or > 3650

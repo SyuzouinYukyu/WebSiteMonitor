@@ -32,9 +32,10 @@ public sealed class MonitorEngine
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             const string error = "監視処理が制限時間を超えました。前回の基準値は保持しています。";
-            if (!_database.ApplyError(site.Id, site.MonitorRevision, error, DateTimeOffset.Now)) return Discarded(site.Id);
+            var committedCount = _database.ApplyErrorWithCommittedCount(site.Id, site.MonitorRevision, error, DateTimeOffset.Now);
+            if (committedCount is null) return Discarded(site.Id);
             _logger.Error($"監視期限超過 SiteId={site.Id}");
-            return new CheckResult(CheckOutcome.Failed, site, error, MonitorRevision: site.MonitorRevision);
+            return new CheckResult(CheckOutcome.Failed, site, error, MonitorRevision: site.MonitorRevision, CommittedConsecutiveErrors: committedCount);
         }
     }
 
@@ -153,9 +154,10 @@ public sealed class MonitorEngine
             var error = ex is HttpRequestException { StatusCode: System.Net.HttpStatusCode.Forbidden } && !site.UseBrowserCompatibleUserAgent
                 ? "403 Forbidden：必要に応じて『ブラウザー互換User-Agentを使用する』を試してください。"
                 : ex is TimeoutException ? "HTTP取得が制限時間を超えました。前回の基準値は保持しています。" : NotificationUrl.SafeException(ex);
-            if (!_database.ApplyError(site.Id, revision, error, now)) return Discarded(site.Id);
+            var committedCount = _database.ApplyErrorWithCommittedCount(site.Id, revision, error, now);
+            if (committedCount is null) return Discarded(site.Id);
             _logger.Error($"監視失敗 SiteId={site.Id} Name={site.Name}", ex);
-            return new CheckResult(CheckOutcome.Failed, site, error, MonitorRevision: revision);
+            return new CheckResult(CheckOutcome.Failed, site, error, MonitorRevision: revision, CommittedConsecutiveErrors: committedCount);
         }
     }
 

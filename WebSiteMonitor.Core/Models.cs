@@ -51,7 +51,7 @@ public sealed record PendingUpdateDialog(long Id, long SiteId, DateTimeOffset Cr
 public sealed record HttpFetchResult(int StatusCode, byte[]? Body, string? MediaType, string? CharacterSet,
     string? ETag, string? LastModified, Uri FinalUri, bool NotModified = false);
 public sealed record CheckResult(CheckOutcome Outcome, Site Site, string Message, string? NewHash = null,
-    string? NewPreview = null, bool ShouldNotify = false, long MonitorRevision = 0, string? NotificationTargetUrl = null);
+    string? NewPreview = null, bool ShouldNotify = false, long MonitorRevision = 0, string? NotificationTargetUrl = null, int? CommittedConsecutiveErrors = null);
 
 public sealed class AppSettings
 {
@@ -64,6 +64,7 @@ public int WindowX { get; set; } = -1;
     public bool StartWithWindows { get; set; }
     public bool WindowsIntegrationEnabled { get; set; } = true;
     public bool NotificationsEnabled { get; set; } = true;
+    public int ConsecutiveErrorAlertThreshold { get; set; } = 3;
     public bool DefaultPopup { get; set; }
     public int HistoryRetentionDays { get; set; } = 180;
     public int LogRetentionDays { get; set; } = 30;
